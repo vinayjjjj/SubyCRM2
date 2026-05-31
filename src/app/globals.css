@@ -1,0 +1,249 @@
+@import "tailwindcss";
+
+/* ── Tailwind v4 theme — maps design tokens to utility classes ── */
+@theme inline {
+  /* Core surfaces / text */
+  --color-background:         var(--bg);
+  --color-foreground:         var(--t1);
+  --color-muted:              var(--al);
+  --color-muted-foreground:   var(--t2);
+  --color-border:             var(--bd);
+  --color-input:              var(--bd);
+  --color-ring:               var(--ac);
+
+  /* shadcn semantic palette */
+  --color-primary:            var(--ac);
+  --color-primary-foreground: var(--ac-fg);
+  --color-secondary:          var(--sf2);
+  --color-secondary-foreground: var(--t1);
+  --color-accent:             var(--al);
+  --color-accent-foreground:  var(--t1);
+  --color-destructive:        var(--rc);
+  --color-destructive-foreground: #ffffff;
+  --color-popover:            var(--sf);
+  --color-popover-foreground: var(--t1);
+  --color-card:               var(--sf);
+  --color-card-foreground:    var(--t1);
+
+  /* Status badge palette — bg-status-green, text-status-green, etc. */
+  --color-status-green-bg:    var(--gb);
+  --color-status-green:       var(--gc);
+  --color-status-yellow-bg:   var(--yb);
+  --color-status-yellow:      var(--yc);
+  --color-status-blue-bg:     var(--bb);
+  --color-status-blue:        var(--bc);
+  --color-status-red-bg:      var(--rb);
+  --color-status-red:         var(--rc);
+  --color-status-purple-bg:   var(--pb);
+  --color-status-purple:      var(--pc);
+  --color-status-orange-bg:   var(--ob);
+  --color-status-orange:      var(--oc);
+
+  /* Border radius */
+  --radius-sm:  var(--r);
+  --radius-md:  var(--r2);
+
+  /* Shadows */
+  --shadow-soft: var(--shadow-sm);
+  --shadow-card: var(--shadow);
+}
+
+:root {
+  --bg: #fafafa;
+  --sf: #ffffff;
+  --sf2: #f9fafb;
+  --bd: #e5e7eb;
+  --bd2: #d1d5db;
+  --t1: #111827;
+  --t2: #6b7280;
+  --t3: #9ca3af;
+  --ac: #111827;
+  --ac-fg: #ffffff;
+  --al: #f3f4f6;
+
+  --gb: #f0fdf4; --gc: #16a34a;
+  --yb: #fefce8; --yc: #ca8a04;
+  --bb: #eff6ff; --bc: #2563eb;
+  --rb: #fef2f2; --rc: #dc2626;
+  --pb: #eef2ff; --pc: #4f46e5;
+  --ob: #fff7ed; --oc: #ea580c;
+
+  --r: 8px;
+  --r2: 12px;
+  --f: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --m: 'JetBrains Mono', ui-monospace, monospace;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+
+  --sidebar-w: 240px;
+  --header-h: 56px;
+  --logo-bg: #dbeafe;
+  --logo-fill: #002294;
+}
+
+.dark {
+  --bg: #09090b;
+  --sf: #18181b;
+  --sf2: #09090b;
+  --bd: #27272a;
+  --bd2: #3f3f46;
+  --t1: #f4f4f5;
+  --t2: #a1a1aa;
+  --t3: #52525b;
+  --ac: #f4f4f5;
+  --ac-fg: #09090b;
+  --al: #27272a;
+
+  --gb: #052e16; --gc: #4ade80;
+  --yb: #422006; --yc: #facc15;
+  --bb: #1e3a8a; --bc: #60a5fa;
+  --rb: #450a0a; --rc: #f87171;
+  --pb: #1e1b4b; --pc: #818cf8;
+  --ob: #431407; --oc: #fb923c;
+  --logo-bg: #18181b;
+  --logo-fill: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--t1);
+  font-family: var(--f);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Cards ── */
+.cd {
+  background: var(--sf);
+  border: 1px solid var(--bd);
+  border-radius: var(--r2);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Headings ── */
+.page-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+
+/* ── Badges ── */
+.bdg {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 500; letter-spacing: 0.01em;
+}
+.bdg::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.5; }
+.bdg-g { background: var(--gb); color: var(--gc); }
+.bdg-y { background: var(--yb); color: var(--yc); }
+.bdg-r { background: var(--rb); color: var(--rc); }
+.bdg-b { background: var(--bb); color: var(--bc); }
+.bdg-p { background: var(--pb); color: var(--pc); }
+.bdg-o { background: var(--ob); color: var(--oc); }
+
+/* ── Global interactive element defaults ── */
+button, [role="button"] { cursor: pointer; }
+a { cursor: pointer; }
+[onClick], label[for] { cursor: pointer; }
+input[type="checkbox"], input[type="radio"] { cursor: pointer; }
+select { cursor: pointer; }
+
+/* ── Tables ── */
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; padding: 10px 16px; font-size: 12px; font-weight: 500; color: var(--t3); background: var(--sf2); border-bottom: 1px solid var(--bd); }
+td { padding: 12px 16px; border-bottom: 1px solid var(--bd); font-size: 13px; vertical-align: middle; }
+tr { transition: background 0.12s ease; }
+tr.cursor-pointer { cursor: pointer; }
+tr:hover td { background: var(--al); }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 16px; border-radius: var(--r); font-size: 13px; font-weight: 500;
+  font-family: var(--f); cursor: pointer; border: 1px solid var(--bd);
+  background: var(--sf); color: var(--t1); transition: all 0.15s; white-space: nowrap; line-height: 1;
+  user-select: none;
+}
+.btn:hover { background: var(--al); border-color: var(--bd2); }
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.btn-dark { background: var(--ac); color: white; border-color: var(--ac); }
+.btn-dark:hover { opacity: 0.9; }
+.btn-g { background: var(--gb); color: var(--gc); border: none; }
+.btn-r { background: var(--rb); color: var(--rc); border: none; }
+.btn-b { background: var(--bb); color: var(--bc); border: none; }
+.btn-p { background: var(--pb); color: var(--pc); border: none; }
+.btn-o { background: var(--ob); color: var(--oc); border: none; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ── Tabs ── */
+.tabs {
+  display: flex; gap: 2px; background: var(--al); border: 1px solid var(--bd);
+  border-radius: var(--r); padding: 3px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.tab {
+  padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 400;
+  cursor: pointer; border: none; background: transparent; color: var(--t2);
+  font-family: var(--f); transition: all 0.15s; white-space: nowrap;
+}
+.tab:hover { color: var(--t1); }
+.tab.active { background: var(--sf); color: var(--t1); font-weight: 500; box-shadow: var(--shadow-sm); }
+
+/* ── Grids ── */
+.g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.g4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.g5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+
+@media (max-width: 1200px) { .g5 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 1024px) { .g4 { grid-template-columns: repeat(2, 1fr); } .g5 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .g5, .g4, .g3 { grid-template-columns: repeat(2, 1fr); } .g2 { grid-template-columns: 1fr; } }
+
+/* ── KPI ── */
+.kpi { padding: 16px 18px; }
+.kpi-label { font-size: 12px; font-weight: 500; color: var(--t3); margin-bottom: 4px; }
+.kpi-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+
+/* ── Section label ── */
+.section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--t3); }
+
+/* ── Inputs ── */
+input, select, textarea {
+  padding: 8px 12px; border: 1px solid var(--bd); border-radius: var(--r);
+  font-size: 13px; font-family: var(--f); outline: none;
+  background: var(--sf); color: var(--t1); width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--ac); box-shadow: 0 0 0 3px rgba(17,24,39,0.06); }
+input::placeholder, textarea::placeholder { color: var(--t3); }
+
+.mono { font-family: var(--m); font-size: 12px; font-variant-numeric: tabular-nums; }
+.empty { padding: 48px 24px; text-align: center; color: var(--t3); font-size: 14px; }
+
+/* ── Premium UX touches ── */
+/* Clickable cards get a subtle lift on hover */
+.clickable-card { transition: box-shadow 0.15s ease, transform 0.15s ease; cursor: pointer; }
+.clickable-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); transform: translateY(-1px); }
+.clickable-card:active { transform: translateY(0); box-shadow: none; }
+/* Input fields have smooth focus transition */
+input, select, textarea { transition: border-color 0.15s, box-shadow 0.15s; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 3px; }
+
+/* ── Spinner ── */
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Modals ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal-content { background: var(--sf); border-radius: var(--r2); box-shadow: 0 8px 30px rgba(0,0,0,0.12); padding: 24px; max-width: 480px; width: 90%; max-height: 80vh; overflow-y: auto; }
+
+@media (max-width: 768px) {
+  .hide-mobile { display: none !important; }
+  th, td { padding: 8px 10px; font-size: 12px; }
+  .kpi { padding: 12px 14px; }
+  .kpi-value { font-size: 18px; }
+  .page-title { font-size: 18px; }
+}

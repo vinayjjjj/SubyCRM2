@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Suby Contacts — Personal CRM · Handoff Doc</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --sf: #ffffff;
+      --sf2: #f5f5f5;
+      --bd: #e5e7eb;
+      --bd2: #d4d4d8;
+      --t1: #111827;
+      --t2: #4b5563;
+      --t3: #9ca3af;
+      --ac: #111827;
+      --pc: #4f46e5;
+      --gc: #16a34a;
+      --oc: #ea580c;
+      --rc: #dc2626;
+      --bc: #2563eb;
+      --yb: #fef9c3;
+      --yc: #b45309;
+      --mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans);
+      color: var(--t1);
+      background: var(--bg);
+      line-height: 1.6;
+      font-size: 15px;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 48px 28px 96px; }
+    h1 { font-size: 34px; letter-spacing: -0.02em; font-weight: 800; margin-bottom: 8px; }
+    h2 {
+      font-size: 22px; letter-spacing: -0.01em; font-weight: 700;
+      margin: 56px 0 14px; padding-top: 18px; border-top: 1px solid var(--bd);
+    }
+    h3 { font-size: 17px; font-weight: 700; margin: 28px 0 10px; color: var(--t1); }
+    h4 { font-size: 14px; font-weight: 700; margin: 16px 0 6px; color: var(--t1); }
+    p, ul, ol { color: var(--t2); margin-bottom: 12px; }
+    ul, ol { padding-left: 22px; }
+    li { margin-bottom: 4px; }
+    a { color: var(--pc); text-decoration: none; border-bottom: 1px dotted var(--pc); }
+    code {
+      font-family: var(--mono); font-size: 12.5px;
+      background: var(--sf2); padding: 1px 6px; border-radius: 4px;
+      border: 1px solid var(--bd); color: var(--t1);
+    }
+    pre {
+      background: #0f172a; color: #e2e8f0;
+      padding: 14px 16px; border-radius: 8px;
+      font-family: var(--mono); font-size: 12.5px;
+      overflow-x: auto; line-height: 1.55;
+      margin: 12px 0 18px;
+    }
+    pre code { background: transparent; border: 0; color: inherit; padding: 0; }
+    .hero {
+      background: linear-gradient(135deg, #4f46e515 0%, var(--sf) 60%);
+      border: 1px solid var(--bd);
+      border-radius: 16px;
+      padding: 32px 30px;
+      margin-bottom: 36px;
+    }
+    .hero .badge {
+      display: inline-block; font-size: 11px; font-weight: 700;
+      padding: 3px 10px; border-radius: 999px;
+      background: var(--pc); color: white;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .hero .tagline { font-size: 17px; color: var(--t2); margin-top: 8px; }
+    .grid { display: grid; gap: 12px; margin: 18px 0; }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 720px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--sf); border: 1px solid var(--bd);
+      border-radius: 10px; padding: 14px 16px;
+    }
+    .kpi { font-size: 22px; font-weight: 800; color: var(--t1); margin-bottom: 2px; }
+    .kpi-label { font-size: 11px; color: var(--t3); text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 999px;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      vertical-align: middle;
+    }
+    .b-mock { background: var(--yb); color: var(--yc); }
+    .b-real { background: #dcfce7; color: var(--gc); }
+    .b-partial { background: #ffedd5; color: var(--oc); }
+    .b-todo { background: #fee2e2; color: var(--rc); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 12px 0; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--bd); vertical-align: top; }
+    th { background: var(--sf2); font-weight: 700; font-size: 12px; color: var(--t2); text-transform: uppercase; letter-spacing: 0.04em; }
+    td code { font-size: 11.5px; }
+    .toc {
+      background: var(--sf); border: 1px solid var(--bd); border-radius: 10px;
+      padding: 18px 22px; margin: 18px 0 36px;
+    }
+    .toc h4 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--t3); }
+    .toc ol { padding-left: 18px; margin: 0; }
+    .toc li { margin-bottom: 3px; font-size: 14px; }
+    .toc a { color: var(--t1); border-bottom: 0; }
+    .toc a:hover { color: var(--pc); }
+    .callout {
+      border-left: 3px solid var(--bc);
+      background: #eff6ff; color: #1e3a8a;
+      padding: 12px 14px; border-radius: 0 8px 8px 0;
+      font-size: 13.5px; margin: 14px 0;
+    }
+    .callout.warn { border-color: var(--oc); background: #fff7ed; color: #7c2d12; }
+    .callout.danger { border-color: var(--rc); background: #fef2f2; color: #7f1d1d; }
+    .callout.good { border-color: var(--gc); background: #f0fdf4; color: #14532d; }
+    .label-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    footer {
+      margin-top: 80px; padding-top: 18px; border-top: 1px solid var(--bd);
+      color: var(--t3); font-size: 12px; text-align: center;
+    }
+    .mono { font-family: var(--mono); }
+    .check { color: var(--gc); font-weight: 700; }
+    .cross { color: var(--rc); font-weight: 700; }
+    .partial-dot { color: var(--oc); font-weight: 700; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <span class="badge">Handoff · v0.1 prototype</span>
+    <h1>Suby Contacts</h1>
+    <div class="tagline">A personal CRM built for a founder running partnerships with payment processors, crypto custodians, VCs, and infra players. Mock-first prototype — everything renders, almost nothing is persisted.</div>
+  </div>
+
+  <div class="toc">
+    <h4>Table of contents</h4>
+    <ol>
+      <li><a href="#why">1. Why this exists</a></li>
+      <li><a href="#stack">2. Tech stack & ports</a></li>
+      <li><a href="#arch">3. Architecture & mock-first pattern</a></li>
+      <li><a href="#tree">4. Folder structure</a></li>
+      <li><a href="#pages">5. Page-by-page walkthrough</a></li>
+      <li><a href="#models">6. Data models</a></li>
+      <li><a href="#ai">7. AI features (current state)</a></li>
+      <li><a href="#backend">8. Backend / API endpoints</a></li>
+      <li><a href="#prod">9. Production checklist (what's missing)</a></li>
+      <li><a href="#setup">10. Setup &amp; run</a></li>
+      <li><a href="#testplan">11. Test plan</a></li>
+    </ol>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="why">1. Why this exists</h2>
+  <p>
+    A founder running Suby (a payments infra company) needs to track 50+ ongoing relationships with:
+    payment processors (Stripe, Adyen), crypto custodians (Coinbase, Ledger), VCs (Sequoia, a16z),
+    AI &amp; infra partners (Mistral, Vercel, HF), and fintech adjacencies (Qonto, Ramp). Traditional CRMs
+    (Salesforce, HubSpot) are built for sales pipelines, not relationship hygiene. Personal CRMs
+    (Folk, Attio) are closer but still demand a lot of manual input.
+  </p>
+  <p>
+    The bet here is <strong>voice-first capture + proactive AI</strong>: send a voice note to a Telegram bot
+    ("coffee with Patrick, follow up in 2 weeks"), the system extracts the action, links it to the right contact,
+    and surfaces it on the Today view. The AI also nudges you to reach out to people you're letting go cold.
+  </p>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="stack">2. Tech stack &amp; ports</h2>
+
+  <p>
+    The prototype currently uses a subset of the official Suby stack (inline CSS instead of Tailwind/shadcn,
+    no auth, no Redis). The target architecture below is what the dev should land on before going live.
+  </p>
+
+  <h3>Target stack (production)</h3>
+
+  <h4>Frontend</h4>
+  <div class="grid grid-3">
+    <div class="card"><div class="kpi-label">Framework</div><div class="kpi">Next.js</div><div style="font-size:12px;color:var(--t3);">App router · React 19 · TypeScript</div></div>
+    <div class="card"><div class="kpi-label">Styling</div><div class="kpi">Tailwind CSS</div><div style="font-size:12px;color:var(--t3);">Design tokens via Tailwind config</div></div>
+    <div class="card"><div class="kpi-label">Components</div><div class="kpi">shadcn/ui</div><div style="font-size:12px;color:var(--t3);">Button, Dialog, Tabs, Tooltip, Sheet…</div></div>
+  </div>
+
+  <h4>Backend</h4>
+  <div class="grid grid-3">
+    <div class="card"><div class="kpi-label">HTTP</div><div class="kpi">Express 5</div><div style="font-size:12px;color:var(--t3);">TypeScript · tsx in dev</div></div>
+    <div class="card"><div class="kpi-label">Auth</div><div class="kpi">better-auth</div><div style="font-size:12px;color:var(--t3);">Session-based, Postgres-backed</div></div>
+    <div class="card"><div class="kpi-label">ORM</div><div class="kpi">Prisma 6</div><div style="font-size:12px;color:var(--t3);">Postgres schema</div></div>
+    <div class="card"><div class="kpi-label">DB (now)</div><div class="kpi">Supabase</div><div style="font-size:12px;color:var(--t3);">eu-west-3 · pooled + direct URLs</div></div>
+    <div class="card"><div class="kpi-label">DB (soon)</div><div class="kpi">Scaleway</div><div style="font-size:12px;color:var(--t3);">Managed Postgres migration planned</div></div>
+    <div class="card"><div class="kpi-label">Queue + cache</div><div class="kpi">Redis · BullMQ</div><div style="font-size:12px;color:var(--t3);">Internal jobs &amp; caching</div></div>
+  </div>
+
+  <h4>AI</h4>
+  <div class="grid grid-3">
+    <div class="card"><div class="kpi-label">LLM</div><div class="kpi">Anthropic SDK</div><div style="font-size:12px;color:var(--t3);">Claude Sonnet 4.6 / Opus when needed</div></div>
+    <div class="card"><div class="kpi-label">Speech-to-text</div><div class="kpi">OpenAI Whisper</div><div style="font-size:12px;color:var(--t3);">For Telegram voice notes</div></div>
+    <div class="card"><div class="kpi-label">Bot host</div><div class="kpi">suby-operation</div><div style="font-size:12px;color:var(--t3);">Separate repo · <code>@subyassist_bot</code></div></div>
+  </div>
+
+  <h4>Local ports</h4>
+  <div class="grid grid-3">
+    <div class="card"><div class="kpi-label">Frontend</div><div class="kpi">3005</div><div style="font-size:12px;color:var(--t3);"><code>npm run dev</code></div></div>
+    <div class="card"><div class="kpi-label">API</div><div class="kpi">4002</div><div style="font-size:12px;color:var(--t3);"><code>npm run dev:api</code></div></div>
+    <div class="card"><div class="kpi-label">Redis</div><div class="kpi">6379</div><div style="font-size:12px;color:var(--t3);">Local <code>docker run redis</code> or managed</div></div>
+  </div>
+
+  <div class="callout warn">
+    <strong>Current prototype gap:</strong> the v0.1 prototype here uses inline CSS variables in
+    <code>src/app/globals.css</code> (classes <code>.cd</code>, <code>.btn</code>, <code>.bdg</code>, <code>.tabs</code>, <code>.kpi</code>).
+    Tailwind is installed but not used in components, shadcn is not wired, and there's no auth or Redis.
+    The migration to the target stack is task #1 of the production checklist below.
+  </div>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="arch">3. Architecture &amp; mock-first pattern</h2>
+
+  <p>
+    Every page is built so it <strong>renders correctly even when the backend is down</strong>. The pattern is:
+  </p>
+
+  <pre><code>// In any view's useEffect:
+contactsApi.getAll(params)
+  .then((res) => {
+    if (res.data?.length) setContacts(res.data);   // real data wins
+    else setContacts(mockFilteredContacts(params));  // fallback
+  })
+  .catch(() => setContacts(mockFilteredContacts(params)));</code></pre>
+
+  <div class="callout">
+    <strong>Why this matters for the dev:</strong> when you wire the real backend, you don't have to
+    touch the components — once <code>res.data</code> has rows, the mock fallback disappears.
+    To test a page with zero data, just empty the corresponding table.
+  </div>
+
+  <h3>Mock data files</h3>
+  <table>
+    <thead><tr><th>File</th><th>What it provides</th></tr></thead>
+    <tbody>
+      <tr><td><code>lib/mock-companies.ts</code></td><td>22 companies (Stripe, Coinbase, Mistral…) with sector, size, funding, description, contacts</td></tr>
+      <tr><td><code>lib/mock-contacts.ts</code></td><td>49 contacts derived from companies, enriched with platforms (X/LinkedIn/Telegram handles), interactions, notes, computed stats</td></tr>
+      <tr><td><code>lib/mock-reminders.ts</code></td><td>14 reminders (mixed pending/done, overdue/today/this week/later)</td></tr>
+      <tr><td><code>lib/mock-events.ts</code></td><td>15 calendar events (last week / this week / next week) with channel + meeting URL</td></tr>
+      <tr><td><code>lib/mock-pipeline.ts</code></td><td>12 deals across 6 stages (intro → first call → tech review → term sheet → live → lost)</td></tr>
+      <tr><td><code>lib/mock-sequences.ts</code></td><td>4 multi-step follow-up sequences with drafts + rationale</td></tr>
+      <tr><td><code>lib/mock-inbox.ts</code></td><td>10 unified-inbox messages across Telegram/X/email/LinkedIn/Discord</td></tr>
+      <tr><td><code>lib/mock-voice-captures.ts</code></td><td>8 voice captures with transcript + extracted actions + 3 simulator templates</td></tr>
+      <tr><td><code>lib/mock-suggestions.ts</code></td><td><strong>Scoring engine</strong> that ranks contacts by who should be re-engaged. Pure logic, no static data. Drives the "Reach-outs to do" section.</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="tree">4. Folder structure</h2>
+
+  <pre><code>suby-contacts/
+├── prisma/
+│   └── schema.prisma          # Contacts, Platforms, Interactions, Notes, Tags, Reminders, Companies, ImportJobs
+├── src/
+│   ├── app/
+│   │   ├── globals.css        # design tokens
+│   │   ├── layout.tsx
+│   │   └── (dashboard)/
+│   │       ├── layout.tsx     # sidebar + main shell
+│   │       └── dashboard/
+│   │           ├── page.tsx              + dashboard-view.tsx  → Overview / "Today"
+│   │           ├── inbox/                                       → Unified Inbox
+│   │           ├── contacts/             + [id]/                → Contacts list + detail
+│   │           ├── companies/            + [id]/                → Companies split view + detail
+│   │           ├── network/                                     → Network graph
+│   │           ├── pipeline/                                    → Deal pipeline kanban
+│   │           ├── sequences/                                   → Follow-up sequences
+│   │           ├── prep/                                        → Pre-call week agenda + modal
+│   │           ├── reminders/                                   → Reminders kanban
+│   │           ├── voice/                                       → Voice capture history + simulator
+│   │           ├── settings/                                    → Integrations
+│   │           └── import/                                      → Import sources (linked from Settings)
+│   ├── components/
+│   │   ├── sidebar.tsx
+│   │   └── platform-icon.tsx
+│   ├── lib/
+│   │   ├── api.ts             # apiFetch + contactsApi / remindersApi / companiesApi / aiApi …
+│   │   ├── types.ts           # Shared TS types
+│   │   ├── mock-*.ts          # see table above
+│   └── server/                # Express backend (separate process on :4002)
+│       ├── index.ts           # mounts routes
+│       ├── lib/               # prisma, anthropic, whisper helpers
+│       ├── routes/            # ai, contact, note, reminder, import, company, tag
+│       ├── services/          # ai, contact, enrichment, import, dedup
+│       ├── import/            # beeper, etc.
+│       └── cron/              # staleCheck
+</code></pre>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="pages">5. Page-by-page walkthrough</h2>
+
+  <p>
+    Status legend:
+    <span class="badge b-mock">Mock</span> client-only mock data ·
+    <span class="badge b-partial">API + mock fallback</span> hits the backend, mocks if empty/error ·
+    <span class="badge b-real">Real</span> backend-only ·
+    <span class="badge b-todo">TODO</span> stub only.
+  </p>
+
+  <h3>Today <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li><strong>Daily brief card</strong> — preview of what <code>@subyassist_bot</code> would push at 8am via Telegram (today's calls, top reach-out, overdue, birthday).</li>
+    <li><strong>Weekly KPIs</strong>: Calls this week · Hot contacts · New this week.</li>
+    <li><strong>"How did it go?"</strong> — past calls (last 3 days) waiting for a Strong/OK/Cold/No-show pick. Closes the meeting-outcome loop.</li>
+    <li><strong>Today's calls</strong> — agenda rows linking to Zoom/Meet directly when a URL is present.</li>
+    <li><strong>Overdue reminders</strong> — quick "Done" inline.</li>
+    <li><strong>Reach-outs to do</strong> — top 4 AI-scored suggestions. Each row expands to show a drafted message (Copy / Regenerate / Skip).</li>
+  </ul>
+
+  <h3>Inbox <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/inbox</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>Split view (list left, detail right) like Superhuman.</li>
+    <li>Filters: All / Unread / Needs reply / Starred.</li>
+    <li>Reply pane logs to the contact timeline (currently mock).</li>
+    <li>Needs to be wired to platform webhooks (Telegram bot, X DMs, IMAP) in prod.</li>
+  </ul>
+
+  <h3>Contacts <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/contacts</span> <span class="badge b-partial">API + mock fallback</span></h3>
+  <ul>
+    <li>Searchable, filterable list (type / domain).</li>
+    <li>"Classify All (AI)" runs Claude classification batch (currently stub — needs real Anthropic call).</li>
+    <li>Detail view at <code>/dashboard/contacts/[id]</code> has a <strong>unified timeline</strong>: interactions + notes + reminders + calendar events merged chronologically on a single rail.</li>
+    <li>Notes composer supports <strong>hashtag auto-tagging</strong>: typing <code>#crypto</code> creates and attaches a Tag.</li>
+  </ul>
+
+  <h3>Companies <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/companies</span> <span class="badge b-partial">API + mock fallback</span></h3>
+  <ul>
+    <li>Split view: list of companies on the left, full detail on the right.</li>
+    <li>Filter by category (Payment / Crypto / VC / Partner).</li>
+    <li>Detail shows linked contacts, sector / size / funding badges, KPIs.</li>
+  </ul>
+
+  <h3>Network <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/network</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>SVG force-layout (deterministic, no animation lib). Contacts grouped by sector cluster around a central "you".</li>
+    <li>Categories: <code>payment</code> · <code>blockchain</code> · <code>vc</code> · <code>infra</code> · <code>fintech</code> · <code>ai</code> · <code>other</code>.</li>
+    <li>Sector pill filter at top — focus mode reorganizes the graph by company group within the selected sector and shows a contacts side panel.</li>
+    <li>Hot contacts have a halo; node size = relationship strength.</li>
+  </ul>
+
+  <h3>Pipeline <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/pipeline</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>6-column kanban: Intro → First call → Tech review → Term sheet → Live → Lost.</li>
+    <li>Drag &amp; drop deals between stages (in-memory state).</li>
+    <li>Per card: company + contact + next step + monthly value + probability bar + stage age warning (&gt;14d).</li>
+    <li>Header KPIs: total deals · weighted pipeline · live MRR.</li>
+  </ul>
+
+  <h3>Sequences <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/sequences</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>4 multi-step follow-up sequences. Each sequence has a goal + ordered steps (channel / delay / draft / rationale).</li>
+    <li>Step status badge: Sent · Scheduled · Waiting · Skipped.</li>
+    <li>Vertical timeline per sequence. Pause / Resume button. <strong>No automatic sending</strong> — user copies the draft manually.</li>
+  </ul>
+
+  <h3>Pre-call <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/prep</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>Weekly agenda view (Mon→Sun, 8am→8pm grid). Events colored by channel.</li>
+    <li>Click an event → modal: contact name, date/time, "Join Zoom" call link, AI pre-qualification briefing (Context / Recent activity / Talking points / Action items).</li>
+    <li>Briefing is generated client-side from <code>buildBriefing(contact)</code> in <code>mock-contacts.ts</code> — swap to a real Claude call.</li>
+  </ul>
+
+  <h3>Reminders <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/reminders</span> <span class="badge b-partial">API + mock fallback</span></h3>
+  <ul>
+    <li>4-column kanban: Overdue · Today · This week · Later. Drag a card to another column to reschedule.</li>
+    <li>Hover a card → "Done" button. The contact pill (with last-talked-on platform icon) opens a contact modal (not navigation).</li>
+    <li>Sidebar badge shows overdue count.</li>
+  </ul>
+
+  <h3>Voice <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/voice</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>History of voice captures sent to <code>@subyassist_bot</code>. Each capture shows: mini waveform, transcript, detected contact, extracted actions (note / reminder / strength bump / tag).</li>
+    <li>"Try a capture" simulator runs the full pipeline (upload → Whisper → Claude) against 3 sample transcripts and prepends the result to the list.</li>
+    <li><strong>Real wiring lives in <code>suby-operation</code></strong> (separate repo) where the Telegram bot runs. This page is the dashboard for that backend.</li>
+  </ul>
+
+  <h3>Settings <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/settings</span> <span class="badge b-mock">Mock</span></h3>
+  <ul>
+    <li>Integration cards grouped by Voice / Calendar &amp; Email / Messaging / Social.</li>
+    <li>Connect / Disconnect toggles simulate the OAuth flow with a 700ms delay.</li>
+    <li>"Import &amp; sync history" card at the bottom links to <code>/dashboard/import</code>.</li>
+  </ul>
+
+  <h3>Import <span class="mono" style="color:var(--t3); font-size:12px;">/dashboard/import</span> <span class="badge b-partial">API + mock fallback</span></h3>
+  <ul>
+    <li>List of import sources (Beeper · WhatsApp · Telegram · Discord · Slack). Beeper has a "Run import" button; others are stubs.</li>
+    <li>Below: history of import jobs (status, found/imported/dedup/errors counts).</li>
+  </ul>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="models">6. Data models</h2>
+
+  <p>Defined in <code>src/lib/types.ts</code> and mirrored in <code>prisma/schema.prisma</code>.</p>
+
+  <h3>Contact</h3>
+  <pre><code>interface Contact {
+  id: string;
+  name: string;
+  type: "vc" | "lead" | "partner" | "friend" | "prospect" | "team" | "advisor" | "media" | "other";
+  domain: "payment" | "blockchain" | "saas" | "ecommerce" | "ai" | "marketing" | "legal" | "finance" | "other";
+  company: string | null;
+  role: string | null;
+  relationshipStrength: "cold" | "warm" | "hot";
+  aiSummary: string | null;
+  lastContactDate: string | null;
+  firstContactDate: string | null;
+  contactFrequency: number | null;
+  platforms?: Platform[];        // X, LinkedIn, Telegram, email handles
+  interactions?: Interaction[];  // DMs / mentions with snippet + platform + direction
+  notes?: Note[];                // free-form notes (supports #hashtags)
+  contactTags?: ContactTag[];
+}</code></pre>
+
+  <h3>Company</h3>
+  <pre><code>interface Company {
+  id: string;
+  name: string;
+  sector: string | null;     // raw — see Network for the display taxonomy
+  size: "startup" | "scaleup" | "enterprise" | null;
+  funding: string | null;    // e.g. "series-c", "public"
+  website: string | null;
+  linkedin: string | null;
+  description: string | null;
+  contactCount?: number;
+}</code></pre>
+
+  <h3>Reminder</h3>
+  <pre><code>interface Reminder {
+  id: string;
+  contactId: string;
+  content: string;
+  dueDate: string;             // ISO
+  status: "pending" | "done" | "dismissed";
+  contact?: { id: string; name: string };
+}</code></pre>
+
+  <h3>CalendarEvent (Pre-call &amp; Today)</h3>
+  <pre><code>interface CalendarEvent {
+  id: string;
+  title: string;
+  start: string; end: string;
+  contactId: string;
+  contactName: string;
+  channel: "zoom" | "meet" | "phone" | "in_person" | "telegram" | "x_space";
+  location?: string;           // URL for zoom/meet, address otherwise
+  description?: string;
+}</code></pre>
+
+  <h3>Deal (Pipeline)</h3>
+  <pre><code>type DealStage = "intro" | "first_call" | "tech_review" | "term_sheet" | "live" | "lost";
+
+interface Deal {
+  id: string;
+  companyId: string; companyName: string;
+  contactId: string; contactName: string;
+  stage: DealStage;
+  value: number;          // monthly volume EUR
+  probability: number;    // 0-100
+  enteredStageAt: string;
+  nextStep: string | null;
+  source: "outbound" | "inbound" | "referral" | "event";
+}</code></pre>
+
+  <h3>Sequence (proactive follow-up)</h3>
+  <pre><code>interface Sequence {
+  id: string;
+  contactId: string; contactName: string; company: string | null;
+  goal: string;
+  paused: boolean;
+  steps: {
+    index: number;
+    channel: "email" | "linkedin" | "telegram" | "x";
+    delayDays: number;
+    scheduledFor: string;       // ISO
+    status: "sent" | "scheduled" | "waiting" | "skipped";
+    draft: string;              // the message text the user copies
+    rationale: string;          // why this step / channel
+  }[];
+}</code></pre>
+
+  <h3>VoiceCapture</h3>
+  <pre><code>interface VoiceCapture {
+  id: string;
+  receivedAt: string;
+  durationSec: number;
+  transcript: string;
+  status: "processed" | "needs_confirmation" | "failed";
+  processingMs: number;
+  actions: {
+    kind: "note" | "reminder" | "strength_bump" | "tag" | "no_action";
+    contactId: string | null; contactName: string | null;
+    description: string;
+    dueDate?: string | null;
+    newStrength?: "cold" | "warm" | "hot";
+    tag?: string;
+  }[];
+}</code></pre>
+
+  <h3>ReachOutSuggestion (AI scoring)</h3>
+  <pre><code>// Computed from MOCK_CONTACTS via computeSuggestions() in lib/mock-suggestions.ts
+interface ReachOutSuggestion {
+  contactId: string; contact: Contact;
+  urgency: "high" | "medium" | "low";
+  score: number;
+  reason: string;        // e.g. "Cold for 87d · investor update overdue"
+  channel: PlatformType | null;
+  channelHandle: string | null;
+  draftMessage: string;  // Template-based copy (varies by sector / type / strength)
+  signals: string[];     // ["Cold for 6mo", "VC priority", …]
+}</code></pre>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="ai">7. AI features (current state)</h2>
+
+  <table>
+    <thead>
+      <tr><th>Feature</th><th>Where</th><th>Status</th><th>To wire</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Contact classification (type / domain / strength)</td>
+        <td>Contacts page · "Classify All (AI)" button</td>
+        <td><span class="badge b-todo">TODO</span></td>
+        <td>Backend route exists at <code>POST /api/ai/classify/:id</code>. Service stub needs real Anthropic call with system prompt that returns JSON.</td>
+      </tr>
+      <tr>
+        <td>Contact AI summary</td>
+        <td>Contact detail · "Summary (AI)" button</td>
+        <td><span class="badge b-todo">TODO</span></td>
+        <td>Same — <code>POST /api/ai/summary/:id</code>.</td>
+      </tr>
+      <tr>
+        <td>Pre-call briefing</td>
+        <td>Pre-call modal</td>
+        <td><span class="badge b-mock">Mock</span></td>
+        <td>Currently <code>buildBriefing()</code> in <code>mock-contacts.ts</code> generates a templated brief. Replace with real <code>POST /api/ai/prep/:id</code> that calls Claude with contact context.</td>
+      </tr>
+      <tr>
+        <td>Reach-out suggestions (scoring + draft)</td>
+        <td>Overview "Reach-outs to do"</td>
+        <td><span class="badge b-mock">Mock</span></td>
+        <td>Scoring logic in <code>mock-suggestions.ts</code> is real, runs client-side. Drafts are templated by sector. Optional: replace draft generation with Claude per contact context.</td>
+      </tr>
+      <tr>
+        <td>Voice capture pipeline</td>
+        <td>Voice page</td>
+        <td><span class="badge b-mock">Mock</span></td>
+        <td>Real implementation lives in <code>suby-operation</code> repo (Telegram bot). Pipeline: Telegram audio → Whisper transcription → Claude tool-use to extract action(s) → write to suby-contacts DB.</td>
+      </tr>
+      <tr>
+        <td>Smart alerts</td>
+        <td>Removed from overview</td>
+        <td><span class="badge b-mock">Mock</span></td>
+        <td>Was on overview, removed by user. Code still in <code>mock-contacts.ts</code> (<code>MOCK_ALERTS</code>).</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="backend">8. Backend / API endpoints</h2>
+
+  <p>
+    Express server in <code>src/server/</code>, started via <code>npm run dev:api</code> on port <code>4002</code>.
+    The frontend calls it through <code>src/lib/api.ts</code>. Schema in <code>prisma/schema.prisma</code>.
+  </p>
+
+  <h3>Routes (mounted in <code>src/server/index.ts</code>)</h3>
+  <table>
+    <thead><tr><th>Verb &amp; path</th><th>Service</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET  /api/contacts</code></td><td>list + filter (type, domain, search, strength, stale_days, pagination)</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>GET  /api/contacts/stats</code></td><td>aggregates by type/strength/domain/staleness</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>GET  /api/contacts/:id</code></td><td>full contact with relations</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>POST /api/contacts</code> · <code>PATCH /api/contacts/:id</code> · <code>DELETE</code></td><td>CRUD</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>POST /api/contacts/merge</code></td><td>merge two duplicates</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>POST /api/contacts/:id/enrich</code></td><td>enrichment from public data</td><td><span class="badge b-partial">Partial</span></td></tr>
+      <tr><td><code>POST /api/contacts/:id/notes</code> · <code>DELETE /:id/notes/:nid</code></td><td>notes CRUD</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>POST /api/contacts/:id/tags</code> · <code>DELETE /:id/tags/:tid</code></td><td>tag assignment</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>GET /api/companies</code> · <code>GET /:id</code> · <code>POST</code> · <code>PUT</code></td><td>companies CRUD</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>POST /api/companies/:id/assign</code></td><td>bulk assign contacts</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>GET  /api/reminders</code> · <code>GET /due</code></td><td>list / overdue</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>POST /api/contacts/:id/reminders</code> · <code>PUT /api/reminders/:id</code> · <code>DELETE</code></td><td>reminders CRUD</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>GET /api/tags</code> · <code>POST</code></td><td>tags</td><td><span class="badge b-real">Real</span></td></tr>
+      <tr><td><code>GET /api/import/jobs</code> · <code>POST /api/imports/beeper</code></td><td>import history + Beeper trigger</td><td><span class="badge b-partial">Partial</span></td></tr>
+      <tr><td><code>POST /api/ai/classify/:id</code> · <code>POST /api/ai/summary/:id</code> · <code>POST /api/ai/prep/:id</code></td><td>AI helpers</td><td><span class="badge b-todo">TODO</span></td></tr>
+      <tr><td><code>POST /api/ai/classify-batch</code> · <code>GET /api/ai/alerts</code></td><td>batch + alerts</td><td><span class="badge b-todo">TODO</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>What's not in the backend yet:</strong> deals, sequences, calendar events, voice captures,
+    inbox messages — all of these are mock-only on the client today. Schema + routes need to be added
+    if persistence is required.
+  </div>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="prod">9. Production checklist</h2>
+
+  <p>Grouped by effort. Things that align the prototype with the target stack are listed first.</p>
+
+  <h3>Stack alignment (the must-dos)</h3>
+  <ul>
+    <li><span class="cross">×</span> <strong>Migrate styling to Tailwind + shadcn/ui</strong>. The prototype uses inline CSS classes (<code>.cd</code>, <code>.btn</code>, <code>.bdg</code>, <code>.tabs</code>, <code>.kpi</code>, <code>.tabs</code>). Approach:
+      <ul>
+        <li>Map the CSS tokens in <code>globals.css</code> (<code>--bd</code>, <code>--sf</code>, <code>--t1</code>, etc.) onto the Tailwind theme.</li>
+        <li>Run <code>npx shadcn@latest init</code> then add components piece-by-piece: <code>Button</code>, <code>Card</code>, <code>Tabs</code>, <code>Badge</code>, <code>Dialog</code>, <code>Tooltip</code>, <code>Sheet</code>, <code>Avatar</code>, <code>Input</code>, <code>Textarea</code>, <code>DropdownMenu</code>.</li>
+        <li>Replace the bespoke kanban / modal / split-view components with shadcn primitives. Layout and behavior already validated — only the chrome changes.</li>
+      </ul>
+    </li>
+    <li><span class="cross">×</span> <strong>Wire better-auth</strong>. Single-user prototype today; in prod even a one-tenant CRM needs session protection.
+      <ul>
+        <li>Install <code>better-auth</code> + <code>@better-auth/cli</code>. Provider: email/password or Google (preferred since Calendar/Gmail already in scope).</li>
+        <li>Generate the Prisma schema add-ons (<code>npx @better-auth/cli generate</code>) and re-migrate.</li>
+        <li>Add the auth middleware on every <code>/api/*</code> route except <code>/api/auth/*</code>.</li>
+        <li>Build a minimal sign-in page; the dashboard layout already mounts a sidebar that can host a profile menu.</li>
+      </ul>
+    </li>
+    <li><span class="cross">×</span> <strong>Add Redis + BullMQ</strong> for jobs and cache.
+      <ul>
+        <li>Queues to create:
+          <ul>
+            <li><code>voice-capture</code>: incoming Telegram voice → Whisper → Claude tool-use → persist.</li>
+            <li><code>ai-classify</code>: batch contact classification (replaces the synchronous "Classify All" button).</li>
+            <li><code>ai-summary</code>: per-contact AI summaries on demand.</li>
+            <li><code>ai-prep</code>: per-event pre-call briefing generation (warm cache 30 min before).</li>
+            <li><code>enrich-contact</code>: LinkedIn/X/website enrichment after creation.</li>
+            <li><code>sequence-tick</code>: every hour, advance sequences whose next step is due (no auto-send — just status transitions).</li>
+            <li><code>daily-brief</code>: cron at 7:55am, builds the brief, hands it to the bot for the 8am Telegram push.</li>
+            <li><code>outcome-prompt</code>: 30 min after a calendar event ends, push the "How did it go?" prompt.</li>
+          </ul>
+        </li>
+        <li>Cache keys: <code>contact:{id}:summary</code>, <code>contact:{id}:briefing</code>, <code>suggestions:{userId}</code> (15 min TTL).</li>
+        <li>Locally: <code>docker run -p 6379:6379 redis</code>. In prod: managed Redis on Scaleway or Upstash.</li>
+      </ul>
+    </li>
+    <li><span class="cross">×</span> <strong>Plan Supabase → Scaleway migration</strong>. Today <code>DATABASE_URL</code> + <code>DIRECT_URL</code> point at Supabase (eu-west-3). The schema is provider-agnostic (standard Postgres), so the migration is:
+      <ul>
+        <li><code>pg_dump</code> → <code>pg_restore</code> against a fresh Scaleway managed Postgres instance.</li>
+        <li>Swap the two env vars. No code changes.</li>
+        <li>Drop the Supabase-specific helpers (auth, realtime, storage) — none are used here, so nothing to port.</li>
+      </ul>
+    </li>
+  </ul>
+
+  <h3>Quick wins (½ day each)</h3>
+  <ul>
+    <li><span class="cross">×</span> Replace <code>process.env.NEXT_PUBLIC_API_URL || "http://localhost:4002"</code> in <code>lib/api.ts</code> with an env-driven production URL.</li>
+    <li><span class="cross">×</span> Set up <code>.env</code>: <code>DATABASE_URL</code>, <code>DIRECT_URL</code>, <code>ANTHROPIC_API_KEY</code>, <code>NEXT_PUBLIC_API_URL</code>, <code>REDIS_URL</code>, <code>BETTER_AUTH_SECRET</code>, <code>BETTER_AUTH_URL</code>.</li>
+    <li><span class="cross">×</span> Run <code>npx prisma migrate dev</code> against an empty DB to generate the initial migration. Schema already declared.</li>
+    <li><span class="cross">×</span> Add a seed script if you want demo data in the DB (today the mocks live only in <code>lib/mock-*.ts</code>).</li>
+    <li><span class="cross">×</span> Hide or remove the mock fallback for production builds (gate the <code>setContacts(mock…)</code> calls behind <code>NODE_ENV !== "production"</code>) — or keep them as a graceful empty state.</li>
+  </ul>
+
+  <h3>Medium (1–3 days each)</h3>
+  <ul>
+    <li><span class="partial-dot">●</span> <strong>AI endpoints</strong>: wire <code>/api/ai/classify</code>, <code>/summary</code>, <code>/prep</code> to Anthropic. Service files exist as stubs — they just need a real Claude call with the contact context (interactions + notes + company). Once wired, push them through BullMQ workers (<code>ai-classify</code>, <code>ai-summary</code>, <code>ai-prep</code> queues).</li>
+    <li><span class="partial-dot">●</span> <strong>Google Calendar integration</strong> for Pre-call: pull events for the next 14 days via OAuth, match attendees against contacts by email. The Settings card and the agenda view are already built. Use better-auth's Google provider to share the OAuth token.</li>
+    <li><span class="partial-dot">●</span> <strong>Beeper import</strong>: extends what's already there (<code>server/import/beeper.ts</code> + <code>POST /api/imports/beeper</code>). Needs Matrix client credentials + bridge mapping. Run as a BullMQ job with progress reporting.</li>
+    <li><span class="partial-dot">●</span> Persist <strong>Deals (Pipeline)</strong>: add Prisma model, routes, swap <code>MOCK_DEALS</code> for API calls in <code>pipeline-view.tsx</code>.</li>
+    <li><span class="partial-dot">●</span> Persist <strong>Sequences</strong>: add Prisma model + routes + the <code>sequence-tick</code> BullMQ job (advances status, no send). The UI is explicit that there's no auto-send.</li>
+  </ul>
+
+  <h3>Larger (1+ week)</h3>
+  <ul>
+    <li><span class="cross">×</span> <strong>Voice capture pipeline</strong> (Telegram bot). Lives in the <code>suby-operation</code> repo. Path: Telegram <code>voice</code> message → enqueue on <code>voice-capture</code> queue (Redis/BullMQ) → worker calls Whisper → Claude tool-use (tools: <code>upsertContact</code>, <code>createNote</code>, <code>createReminder</code>, <code>bumpStrength</code>, <code>addTag</code>) → writes to <code>suby-contacts</code> Postgres + emits an SSE event to refresh the Voice page.</li>
+    <li><span class="cross">×</span> <strong>Unified inbox</strong>: real connectors. Telegram (bot or MTProto), X (DM polling), Gmail (push notifications via Pub/Sub), LinkedIn (no public API → Unipile or manual). Each connector is its own BullMQ worker writing to an <code>InboxMessage</code> table.</li>
+    <li><span class="cross">×</span> <strong>Meeting outcome loop</strong>: <code>outcome-prompt</code> queue fires 30 min after the Google Calendar event ends → push notification via the Telegram bot. Response updates strength + creates next-step reminder.</li>
+    <li><span class="cross">×</span> <strong>Daily morning brief</strong>: <code>daily-brief</code> cron at 7:55am builds content + hands to the bot for the 8am Telegram push.</li>
+    <li><span class="cross">×</span> <strong>Suggestions caching</strong>: move <code>computeSuggestions()</code> from client-side to a backend job; cache result in Redis (15 min TTL). Avoids recomputing on every Overview render once the data set grows.</li>
+  </ul>
+
+  <h3>Nice-to-have</h3>
+  <ul>
+    <li><span class="cross">×</span> Real-time updates via SSE/WebSockets for the Inbox + Reminders pages (BullMQ events → SSE bridge).</li>
+    <li><span class="cross">×</span> Mobile-friendly polish (sidebar already collapses; some pages need narrower layouts).</li>
+    <li><span class="cross">×</span> Dark mode (CSS tokens are isolated in <code>:root</code>; map them on Tailwind <code>dark:</code> variants during the shadcn migration).</li>
+    <li><span class="cross">×</span> Export contacts to CSV.</li>
+    <li><span class="cross">×</span> Bulk actions on the contacts list (tag N contacts, delete N).</li>
+  </ul>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="setup">10. Setup &amp; run</h2>
+
+  <h3>Prerequisites</h3>
+  <ul>
+    <li>Node 20+</li>
+    <li>A Postgres database (Supabase today; Scaleway managed Postgres planned). Existing dev DB ref: <code>ypyrjbhhhlbtcuschjmy</code>, eu-west-3.</li>
+    <li>Redis (for BullMQ jobs + cache). Local: <code>docker run -p 6379:6379 redis</code>.</li>
+    <li>Anthropic API key (Claude). OpenAI key for Whisper if running the voice pipeline locally.</li>
+  </ul>
+
+  <h3>Install</h3>
+  <pre><code>git clone &lt;repo&gt; suby-contacts
+cd suby-contacts
+npm install
+cp .env.example .env.local   # see env table below
+npx prisma generate
+npx prisma migrate dev       # creates schema in your DB</code></pre>
+
+  <h3>Run (three processes)</h3>
+  <pre><code># Terminal 1 · frontend on :3005
+npm run dev
+
+# Terminal 2 · backend on :4002
+npm run dev:api
+
+# Terminal 3 · Redis on :6379 (skip if you have one running)
+docker run -p 6379:6379 redis
+
+# (Once BullMQ workers are wired) Terminal 4 · workers
+npm run dev:workers</code></pre>
+
+  <p>
+    Without the backend, the UI still fully works thanks to the mock fallbacks. With the backend
+    and an empty database, you'll see empty states unless you seed. Redis isn't needed until the
+    BullMQ queues (voice, AI batches, sequences, daily brief) are wired.
+  </p>
+
+  <h3>Environment variables</h3>
+  <table>
+    <thead><tr><th>Var</th><th>Purpose</th><th>Required</th></tr></thead>
+    <tbody>
+      <tr><td><code>DATABASE_URL</code></td><td>Postgres connection (pooled)</td><td>Yes (backend)</td></tr>
+      <tr><td><code>DIRECT_URL</code></td><td>Postgres direct connection (Prisma migrations)</td><td>Yes (backend)</td></tr>
+      <tr><td><code>REDIS_URL</code></td><td>BullMQ + cache. e.g. <code>redis://localhost:6379</code></td><td>Once jobs are wired</td></tr>
+      <tr><td><code>BETTER_AUTH_SECRET</code></td><td>Session signing secret. Generate with <code>openssl rand -base64 32</code></td><td>Once auth is wired</td></tr>
+      <tr><td><code>BETTER_AUTH_URL</code></td><td>Base URL of the app (e.g. <code>http://localhost:3005</code> dev, prod URL in prod)</td><td>Once auth is wired</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code> · <code>GOOGLE_CLIENT_SECRET</code></td><td>OAuth for Google sign-in + Calendar/Gmail access</td><td>For Google integrations</td></tr>
+      <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Claude calls</td><td>For AI features</td></tr>
+      <tr><td><code>OPENAI_API_KEY</code></td><td>Whisper transcription (voice pipeline)</td><td>For Voice feature</td></tr>
+      <tr><td><code>NEXT_PUBLIC_API_URL</code></td><td>Frontend's pointer to backend</td><td>Default <code>http://localhost:4002</code></td></tr>
+      <tr><td><code>BEEPER_*</code></td><td>Matrix credentials for Beeper import</td><td>Only if using Beeper</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ─────────────────────────────────────────────────── -->
+  <h2 id="testplan">11. Test plan</h2>
+
+  <p>What to click through after wiring the backend, to confirm nothing regressed.</p>
+
+  <ol>
+    <li><strong>Boot empty</strong> — start with an empty DB. Every page should render. The mock fallback kicks in. ✓</li>
+    <li><strong>Seed contacts</strong> — POST a handful of contacts via the API. The list should populate; mocks step out of the way.</li>
+    <li><strong>Add a note with hashtag</strong> — open a contact, type "first sync #strategic #q3". Confirm two tags appear on the contact + chips render in the note inside the unified timeline.</li>
+    <li><strong>Reminder kanban drag</strong> — drag a reminder from "Today" to "Later". Verify backend persistence (refresh page, check column).</li>
+    <li><strong>Pre-call modal</strong> — click an event in the week agenda. Confirm modal shows the AI brief. With the real backend, this should call Claude (currently mock returns a templated brief).</li>
+    <li><strong>Pipeline drag</strong> — drag a deal between stages. Currently in-memory only — confirm it doesn't crash; persistence requires the Deal model + routes.</li>
+    <li><strong>Sequences expand</strong> — click a sequence row. Verify steps render with the right status colors and rationale lines.</li>
+    <li><strong>Voice simulator</strong> — on <code>/dashboard/voice</code>, click any "Try a capture" button. Confirm the 3-step animation (uploading → transcribing → extracting) runs and prepends a new capture to the list.</li>
+    <li><strong>Inbox reply</strong> — open a message, type a reply, click Send. Currently mock — just confirm the UI moves through Sending → Sent.</li>
+    <li><strong>Network filter</strong> — click each sector pill. Confirm the graph reorganizes and the side panel appears with contacts grouped by company.</li>
+    <li><strong>Settings toggles</strong> — click Connect / Disconnect on each integration card. 700ms delay simulates an OAuth flow; counters update.</li>
+    <li><strong>Sidebar navigation</strong> — verify every link works and the active state highlights correctly.</li>
+  </ol>
+
+  <div class="callout good">
+    <strong>How to know it's production-ready:</strong> the test plan above passes with the backend running
+    and an empty <code>NODE_ENV=production</code> build (no mock fallback triggered). All AI buttons return
+    real Claude responses. The Telegram bot creates real notes/reminders when you send it a voice note.
+  </div>
+
+  <footer>
+    Generated for the suby-contacts handoff. Project lives in <code>~/Documents/GitHub/suby-contacts</code>.
+  </footer>
+
+</div>
+</body>
+</html>

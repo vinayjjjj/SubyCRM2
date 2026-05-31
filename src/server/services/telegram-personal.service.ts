@@ -1,0 +1,760 @@
+import { prisma } from "../lib/prisma";
+import { inboxService } from "./inbox.service";
+
+// In-memory client registry (one per user session)
+const clients: Map<string, unknown> = new Map();
+
+// Entity cache: userId → (numericTelegramId → GramJS entity)
+// Populated on dialog load so sends to numeric IDs don't reload all dialogs every time
+const entityCache: Map<string, Map<string, any>> = new Map();
+
+async function warmEntityCache(userId: string, client: any) {
+  try {
+    const dialogs = await client.getDialogs({ limit: 200 });
+    const cache = new Map<string, any>();
+    for (const d of dialogs) {
+      if (d.entity?.id) cache.set(d.entity.id.toString(), d.entity);
+    }
+    entityCache.set(userId, cache);
+    console.log(`[telegram-personal] Entity cache warmed: ${cache.size} entities`);
+  } catch (err) {
+    console.error("[telegram-personal] Failed to warm entity cache:", err);
+  }
+}
+
+// Resolve a numeric peer ID to a GramJS entity (needs access hash to actually send).
+// Tries entity cache first, warms cache on miss, then falls back to getInputEntity API call.
+async function resolveNumericPeer(userId: string, peer: string, client: any): Promise<any> {
+  let cached = entityCache.get(userId)?.get(peer);
+  if (!cached) {
+    await warmEntityCache(userId, client);
+    cached = entityCache.get(userId)?.get(peer);
+  }
+  if (cached) return cached;
+
+  // Final fallback: ask Telegram directly — this works for any user the account has interacted with
+  try {
+    const entity = await client.getInputEntity(BigInt(peer));
+    // Store in cache for next time
+    const cache = entityCache.get(userId) ?? new Map<string, any>();
+    cache.set(peer, entity);
+    entityCache.set(userId, cache);
+    return entity;
+  } catch (err) {
+    console.error(`[telegram-personal] Could not resolve entity for peer ${peer}:`, err);
+    // Last resort: bare BigInt (will likely fail with "input entity" error at send time)
+    return BigInt(peer);
+  }
+}
+const pendingCodes: Map<string, { phoneCodeHash: string; phoneNumber: string }> = new Map();
+const tgStates: Map<string, {
+  qr: string | null;
+  connected: boolean;
+  phone: string | null;
+  client: any;
+  error: string | null;
+  passwordRequired: boolean;
+  passwordResolver?: (password: string) => void;
+}> = new Map();
+
+const ENV_API_ID = process.env.TELEGRAM_API_ID ? Number(process.env.TELEGRAM_API_ID) : null;
+const ENV_API_HASH = process.env.TELEGRAM_API_HASH || null;
+
+async function getTelegramLib() {
+  const { TelegramClient } = await import("telegram");
+  const { StringSession } = await import("telegram/sessions");
+  const { NewMessage } = await import("telegram/events");
+  return { TelegramClient, StringSession, NewMessage };
+}
+
+function isSessionExpired(err: unknown): boolean {
+  const msg = String(err);
+  return msg.includes("AUTH_KEY_UNREGISTERED") || msg.includes("AUTH_KEY_DUPLICATED") || msg.includes("SESSION_REVOKED") || msg.includes("SESSION_EXPIRED") || msg.includes("USER_DEACTIVATED");
+}
+
+async function clearSession(userId: string) {
+  const client = clients.get(userId) as any;
+  if (client) { try { await client.disconnect(); } catch { /* ignore */ } clients.delete(userId); }
+  await (prisma as any).telegramPersonalSession.deleteMany({ where: { userId } });
+  console.log(`[telegram-personal] Cleared expired session for user ${userId}`);
+}
+
+async function findContactForTelegram(entity: any) {
+  if (!entity) return null;
+  const username = entity.username;
+  const phone = entity.phone;
+  const idStr = entity.id?.toString();
+
+  const platforms = await prisma.platform.findMany({
+    where: {
+      OR: [
+        { type: "telegram" },
+        { type: "whatsapp" } // Sometimes cross-platform numbers are matched
+      ]
+    },
+    include: { contact: true },
+  });
+
+  const platform = platforms.find(p => {
+    if (idStr && p.platformId === idStr) return true;
+    if (username) {
+      const bare = username.replace(/^@+/, "").toLowerCase();
+      const pBare = p.platformId.replace(/^@+/, "").toLowerCase();
+      if (bare === pBare) return true;
+    }
+    if (phone) {
+      if (phone.includes(p.platformId) || p.platformId.includes(phone)) return true;
+    }
+    return false;
+  });
+
+  return platform?.contact || null;
+}
+
+async function downloadTelegramMedia(client: any, messageId: number, media: any): Promise<string | null> {
+  if (!media) return null;
+  try {
+    const buffer = await client.downloadMedia(media);
+    if (!buffer) return null;
+
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    const dir = path.join(process.cwd(), "public", "media");
+    await fs.mkdir(dir, { recursive: true });
+
+    let ext = "jpg";
+    if (media.document?.mimeType) {
+      const parts = media.document.mimeType.split("/");
+      if (parts[1]) ext = parts[1];
+    }
+
+    const filename = `tg_${messageId}.${ext}`;
+    await fs.writeFile(path.join(dir, filename), buffer);
+    return `/media/${filename}`;
+  } catch (err) {
+    console.error(`[telegram-personal] Failed to download media for msg ${messageId}:`, err);
+    return null;
+  }
+}
+
+export const telegramPersonalService = {
+  async getQrStatus(userId: string) {
+    const state = tgStates.get(userId);
+    if (!state) return { active: false, connected: false, qr: null, passwordRequired: false, error: null };
+    return {
+      active: true,
+      connected: state.connected,
+      qr: state.qr,
+      passwordRequired: state.passwordRequired,
+      phone: state.phone,
+      error: state.error,
+    };
+  },
+
+  async submitPassword(userId: string, password: string) {
+    const state = tgStates.get(userId);
+    if (!state || !state.passwordResolver) throw new Error("No pending 2FA password input found for this session.");
+    state.passwordResolver(password);
+    state.passwordRequired = false;
+    delete state.passwordResolver;
+    return { success: true };
+  },
+
+  async startQrFlow(userId: string, apiId?: number, apiHash?: string): Promise<{ active: boolean }> {
+    const resolvedApiId = apiId ?? ENV_API_ID;
+    const resolvedApiHash = apiHash ?? ENV_API_HASH;
+    if (!resolvedApiId || !resolvedApiHash) {
+      throw new Error("Telegram API credentials not configured. Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .env.local or provide apiId and apiHash.");
+    }
+
+    const { TelegramClient, StringSession } = await getTelegramLib();
+
+    // Check existing session
+    const existing = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    const sessionStr = existing?.sessionStr ?? "";
+
+    const client = new TelegramClient(new StringSession(sessionStr), resolvedApiId, resolvedApiHash, {
+      connectionRetries: 3,
+    });
+    await client.connect();
+    clients.set(userId, client);
+
+    const userState = {
+      qr: null as string | null,
+      connected: false,
+      phone: null as string | null,
+      client,
+      error: null as string | null,
+      passwordRequired: false,
+      passwordResolver: undefined as ((password: string) => void) | undefined,
+    };
+    tgStates.set(userId, userState);
+
+    // Run the QR flow in background
+    (async () => {
+      try {
+        const user = await client.signInUserWithQrCode(
+          { apiId: resolvedApiId, apiHash: resolvedApiHash },
+          {
+            qrCode: async (params: any) => {
+              const { token } = params;
+              const qrUrl = `tg://login?token=${token.toString("base64url")}`;
+              const QRCode = await import("qrcode");
+              userState.qr = await QRCode.toDataURL(qrUrl);
+            },
+            onError: async (err: any) => {
+              console.error("Telegram QR sign-in error:", err);
+              userState.error = err.message || String(err);
+              return true; // Stop
+            },
+            password: async () => {
+              userState.passwordRequired = true;
+              return new Promise<string>((resolve) => {
+                userState.passwordResolver = resolve;
+              });
+            },
+          } as any
+        );
+
+        userState.connected = true;
+        userState.qr = null;
+        const me = await client.getMe();
+        userState.phone = me.phone ?? null;
+
+        const savedSession = (client.session as InstanceType<typeof StringSession>).save() as unknown as string;
+        await (prisma as any).telegramPersonalSession.upsert({
+          where: { userId },
+          create: { userId, phoneNumber: me.phone ?? "", apiId: resolvedApiId, apiHash: resolvedApiHash, sessionStr: savedSession, connected: true },
+          update: { phoneNumber: me.phone ?? "", apiId: resolvedApiId, apiHash: resolvedApiHash, sessionStr: savedSession, connected: true },
+        });
+
+        // Register message listener and warm entity cache in background
+        telegramPersonalService._attachListener(userId, client);
+        warmEntityCache(userId, client);
+      } catch (err: any) {
+        console.error("QR Code auth loop finished with error:", err);
+        userState.error = err.message || String(err);
+      }
+    })();
+
+    return { active: true };
+  },
+
+  async getStatus(userId: string) {
+    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    const hasEnvCreds = !!(ENV_API_ID && ENV_API_HASH);
+    if (!rec) return { connected: false, lastSync: null, hasEnvCreds };
+    return { connected: rec.connected, lastSync: rec.lastSyncAt?.toISOString() ?? null, phone: rec.phoneNumber, hasEnvCreds };
+  },
+
+  async sendCode(userId: string, phoneNumber: string, apiId?: number, apiHash?: string): Promise<{ sent: boolean }> {
+    const resolvedApiId = apiId ?? ENV_API_ID;
+    const resolvedApiHash = apiHash ?? ENV_API_HASH;
+    if (!resolvedApiId || !resolvedApiHash) throw new Error("Telegram API credentials not configured. Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .env.local or provide apiId and apiHash.");
+
+    const { TelegramClient, StringSession } = await getTelegramLib();
+
+    const existing = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    const sessionStr = existing?.sessionStr ?? "";
+
+    const client = new TelegramClient(new StringSession(sessionStr), resolvedApiId, resolvedApiHash, {
+      connectionRetries: 3,
+    });
+    await client.connect();
+    clients.set(userId, client);
+
+    const result = await client.sendCode({ apiId: resolvedApiId, apiHash: resolvedApiHash }, phoneNumber) as { phoneCodeHash: string };
+    pendingCodes.set(userId, { phoneCodeHash: result.phoneCodeHash, phoneNumber });
+
+    await (prisma as any).telegramPersonalSession.upsert({
+      where: { userId },
+      create: { userId, phoneNumber, apiId: resolvedApiId, apiHash: resolvedApiHash, connected: false },
+      update: { phoneNumber, apiId: resolvedApiId, apiHash: resolvedApiHash },
+    });
+
+    return { sent: true };
+  },
+
+  async verify(userId: string, code: string, password?: string): Promise<{ connected: boolean }> {
+    const { TelegramClient, StringSession } = await getTelegramLib();
+
+    const pending = pendingCodes.get(userId);
+    if (!pending) throw new Error("No pending code — call sendCode first");
+
+    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    if (!rec) throw new Error("Session not found");
+
+    let client = clients.get(userId) as InstanceType<typeof TelegramClient> | undefined;
+    if (!client) {
+      client = new TelegramClient(new StringSession(rec.sessionStr ?? ""), rec.apiId, rec.apiHash, { connectionRetries: 3 });
+      await client.connect();
+      clients.set(userId, client);
+    }
+
+    await client.signInUser(
+      { apiId: rec.apiId, apiHash: rec.apiHash },
+      {
+        phoneNumber: pending.phoneNumber,
+        phoneCodeHash: pending.phoneCodeHash,
+        phoneCode: () => Promise.resolve(code),
+        password: password ? () => Promise.resolve(password) : undefined,
+        onError: (err: Error) => { throw err; },
+      } as any,
+    );
+
+    const sessionStr = (client.session as InstanceType<typeof StringSession>).save() as unknown as string;
+    pendingCodes.delete(userId);
+
+    await (prisma as any).telegramPersonalSession.update({
+      where: { userId },
+      data: { sessionStr, connected: true },
+    });
+
+    // Register live message listener and warm entity cache in background
+    telegramPersonalService._attachListener(userId, client);
+    warmEntityCache(userId, client);
+
+    return { connected: true };
+  },
+
+  async importContacts(userId: string): Promise<{ imported: number; updated: number; skipped: number }> {
+    const { TelegramClient, StringSession } = await getTelegramLib();
+    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    if (!rec?.sessionStr) throw new Error("Telegram personal not authenticated");
+
+    let client = clients.get(userId) as InstanceType<typeof TelegramClient> | undefined;
+    if (!client) {
+      client = new TelegramClient(new StringSession(rec.sessionStr), rec.apiId, rec.apiHash, { connectionRetries: 3 });
+      await client.connect();
+      clients.set(userId, client);
+      telegramPersonalService._attachListener(userId, client);
+    }
+
+    const dialogs = await client.getDialogs({ limit: 200 });
+
+    // Populate entity cache while we have the dialogs loaded
+    const cache = entityCache.get(userId) ?? new Map<string, any>();
+    for (const d of dialogs) { if (d.entity?.id) cache.set(d.entity.id.toString(), d.entity); }
+    entityCache.set(userId, cache);
+
+    let imported = 0, updated = 0, skipped = 0;
+
+    for (const dialog of dialogs) {
+      try {
+        const entity = dialog.entity as any;
+
+        // Only process private user chats — skip groups, channels, bots
+        if (!entity || entity.className !== "User") { skipped++; continue; }
+        if (entity.bot) { skipped++; continue; }
+        if (entity.self) { skipped++; continue; } // "Saved Messages"
+
+        const firstName = entity.firstName ?? "";
+        const lastName = entity.lastName ?? "";
+        const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+        if (!fullName) { skipped++; continue; }
+
+        const username = entity.username ?? null;
+        const phone = entity.phone ?? null;
+        const telegramId = entity.id?.toString() ?? null;
+        if (!telegramId) { skipped++; continue; }
+
+        const lastMessageDate = dialog.date ? new Date(dialog.date * 1000) : null;
+
+        // Check if already in CRM
+        const existing = await findContactForTelegram(entity);
+        if (existing) {
+          // Update lastContactDate if dialog has a newer message
+          if (lastMessageDate && (!existing.lastContactDate || lastMessageDate > existing.lastContactDate)) {
+            await prisma.contact.update({
+              where: { id: existing.id },
+              data: { lastContactDate: lastMessageDate },
+            });
+          }
+          updated++;
+          continue;
+        }
+
+        // Create new contact + platform record
+        const platformIdToUse = username ?? telegramId;
+        await prisma.contact.create({
+          data: {
+            name: fullName,
+            lastContactDate: lastMessageDate,
+            firstContactDate: lastMessageDate,
+            type: "other",
+            domain: "other",
+            relationshipStrength: "cold",
+            platforms: {
+              create: [{
+                type: "telegram" as const,
+                platformId: platformIdToUse,
+                displayName: fullName,
+                profileUrl: username ? `https://t.me/${username}` : null,
+              }],
+            },
+          },
+        });
+
+        // Also create a whatsapp platform if phone is known
+        if (phone) {
+          const created = await prisma.contact.findFirst({
+            where: { platforms: { some: { type: "telegram", platformId: platformIdToUse } } },
+          });
+          if (created) {
+            const exists = await prisma.platform.findFirst({ where: { type: "whatsapp", platformId: phone } });
+            if (!exists) {
+              await prisma.platform.create({
+                data: { contactId: created.id, type: "whatsapp", platformId: phone, displayName: fullName },
+              });
+            }
+          }
+        }
+
+        imported++;
+      } catch (err: any) {
+        console.error("[telegram-import] skipped dialog:", err.message);
+        skipped++;
+      }
+    }
+
+    console.log(`[telegram-import] done — imported=${imported} updated=${updated} skipped=${skipped}`);
+    return { imported, updated, skipped };
+  },
+
+  async sync(userId: string, opts?: { deep?: boolean }): Promise<{ synced: number }> {
+    const { TelegramClient, StringSession } = await getTelegramLib();
+    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    if (!rec?.sessionStr) throw new Error("Not authenticated");
+
+    let client = clients.get(userId) as InstanceType<typeof TelegramClient> | undefined;
+    if (!client) {
+      client = new TelegramClient(new StringSession(rec.sessionStr), rec.apiId, rec.apiHash, { connectionRetries: 3 });
+      await client.connect();
+      clients.set(userId, client);
+      telegramPersonalService._attachListener(userId, client);
+    }
+
+    // deep=true on first-time historical import: more dialogs, more messages per chat
+    const dialogLimit = opts?.deep ? 200 : 100;
+    const msgLimit    = opts?.deep ? 200 : 50;
+
+    const dialogs = await client.getDialogs({ limit: dialogLimit });
+    let synced = 0;
+
+    for (const dialog of dialogs) {
+      try {
+        const entity = dialog.entity as any;
+        if (!entity || entity.className !== "User" || entity.bot || entity.self) continue;
+
+        const contact = await findContactForTelegram(entity);
+        if (!contact) continue; // Only sync CRM contacts
+
+        const messages = await client.getMessages(entity, { limit: msgLimit });
+        const contactName = contact.name;
+
+        for (const msg of messages) {
+          if (!msg.text && !msg.media) continue;
+
+          let body = msg.text || "";
+          if (msg.media) {
+            const mediaUrl = await downloadTelegramMedia(client, msg.id, msg.media);
+            if (mediaUrl) {
+              const isImage = /\.(jpg|png|jpeg|gif|webp)$/i.test(mediaUrl);
+              body = isImage
+                ? `${body}\n\n![Image](${mediaUrl})`.trim()
+                : `${body}\n\n[File](${mediaUrl})`.trim();
+            } else if (!body) {
+              body = "[Media message]";
+            }
+          }
+          if (!body) continue;
+
+          await inboxService.upsert({
+            platform: "telegram",
+            externalId: `personal-${msg.id}`,
+            contactId: contact.id,
+            contactName,
+            senderId: entity.id.toString(),
+            preview: body.slice(0, 120),
+            body,
+            receivedAt: new Date(msg.date * 1000),
+            needsReply: !msg.out,
+            fromMe: !!msg.out,
+          });
+          synced++;
+        }
+      } catch (err) {
+        console.error("[telegram-sync] dialog skipped:", (err as any)?.message ?? err);
+      }
+    }
+
+    await (prisma as any).telegramPersonalSession.update({
+      where: { userId },
+      data: { lastSyncAt: new Date() },
+    });
+    console.log(`[telegram-sync] done — synced=${synced} deep=${!!opts?.deep}`);
+    return { synced };
+  },
+
+  _attachListener(userId: string, client: unknown) {
+    const typedClient = client as any;
+    try {
+      import("telegram/events").then(({ NewMessage, Raw }) => {
+        // ── Incoming / outgoing messages ──────────────────────────────────────────
+        typedClient.addEventHandler(async (event: any) => {
+          try {
+            const msg = event.message;
+            if (!msg?.text && !msg?.media) return;
+
+            const chat = await msg.getChat();
+            let contact = await findContactForTelegram(chat);
+            let chatEntity = chat;
+
+            if (!contact) {
+              const sender = await msg.getSender();
+              contact = await findContactForTelegram(sender);
+              if (contact) {
+                chatEntity = sender;
+              }
+            }
+
+            if (!contact || !chatEntity) {
+              // Privacy filter: ignore messages from non-CRM contacts
+              return;
+            }
+
+            let body = msg.text || "";
+            if (msg.media) {
+              const mediaUrl = await downloadTelegramMedia(typedClient, msg.id, msg.media);
+              if (mediaUrl) {
+                const isImage = mediaUrl.endsWith(".jpg") || mediaUrl.endsWith(".png") || mediaUrl.endsWith(".jpeg") || mediaUrl.endsWith(".gif") || mediaUrl.endsWith(".webp");
+                if (isImage) {
+                  body = `${body}\n\n![Image](${mediaUrl})`.trim();
+                } else {
+                  body = `${body}\n\n[File](${mediaUrl})`.trim();
+                }
+              } else if (!body) {
+                body = "[Media message]";
+              }
+            }
+            if (!body) body = "[Unknown message type]";
+
+            await inboxService.upsert({
+              platform: "telegram",
+              externalId: `personal-${msg.id}`,
+              contactId: contact.id,
+              contactName: contact.name,
+              senderId: chatEntity.id.toString(),
+              preview: body.slice(0, 120),
+              body,
+              receivedAt: new Date(msg.date * 1000),
+              needsReply: !msg.out,
+              fromMe: !!msg.out,
+            });
+          } catch (e) {
+            console.error("[telegram-personal] Live listener handler error:", e);
+          }
+        }, new NewMessage({}));
+
+        // ── Deleted messages (delete for me / delete for everyone) ───────────────
+        // GramJS exposes deletions via Raw updates: UpdateDeleteMessages (private)
+        // and UpdateDeleteChannelMessages (groups/channels).
+        typedClient.addEventHandler(async (update: any) => {
+          try {
+            const className = update?.className ?? "";
+            if (className !== "UpdateDeleteMessages" && className !== "UpdateDeleteChannelMessages") return;
+
+            const ids: number[] = update.messages ?? [];
+            for (const msgId of ids) {
+              const stored = await (prisma as any).inboxMessage.findFirst({
+                where: { platform: "telegram", externalId: `personal-${msgId}` },
+              });
+              if (stored) {
+                await inboxService.deleteMessage(stored.id);
+                console.log(`[telegram-personal] Reflected deletion of personal-${msgId}`);
+              }
+            }
+          } catch (e) {
+            console.error("[telegram-personal] Deletion handler error:", e);
+          }
+        }, new Raw({}));
+
+      }).catch(() => { /* ignore */ });
+    } catch { /* ignore */ }
+  },
+
+  async sendPersonalMessage(userId: string, peer: string, text: string, replyTo?: number, contactId?: string | null): Promise<void> {
+    const { TelegramClient, StringSession } = await getTelegramLib();
+    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    if (!rec?.sessionStr) throw new Error("Telegram not connected — go to Settings → Telegram to reconnect.");
+
+    let client = clients.get(userId) as any;
+    if (!client) {
+      try {
+        client = new TelegramClient(new StringSession(rec.sessionStr), rec.apiId, rec.apiHash, { connectionRetries: 3 });
+        await client.connect();
+        clients.set(userId, client);
+        telegramPersonalService._attachListener(userId, client);
+      } catch (err) {
+        if (isSessionExpired(err)) {
+          await clearSession(userId);
+          throw new Error("Telegram session expired — go to Settings → Telegram to reconnect.");
+        }
+        throw err;
+      }
+    }
+
+    // Resolve the target peer — GramJS needs the access hash alongside the user ID.
+    let targetPeer: any = peer;
+    if (/^-?\d+$/.test(peer)) {
+      targetPeer = await resolveNumericPeer(userId, peer, client);
+    }
+
+    // Try to find contact by platformId (username), then by numeric senderId, then by contactId passed from the reply chain
+    const platform = await prisma.platform.findFirst({
+      where: { type: "telegram", OR: [{ platformId: peer }, { platformId: peer.replace(/^@/, "") }] },
+      include: { contact: true },
+    });
+    let contact = platform?.contact ?? null;
+    if (!contact && contactId) {
+      contact = await prisma.contact.findUnique({ where: { id: contactId } }) ?? null;
+    }
+
+    // Check if the text contains a markdown media tag: ![image](path) or [file](path)
+    const mediaMatch = text.match(/!?\[([^\]]*)\]\(([^)]+)\)/);
+    if (mediaMatch) {
+      const relativePath = mediaMatch[2];
+      const cleanText = text.replace(/!?\[([^\]]*)\]\(([^)]+)\)/, "").trim();
+
+      const path = await import("path");
+      const fs = await import("fs/promises");
+      const filename = path.basename(relativePath);
+      const filePath = path.join(process.cwd(), "public", "media", filename);
+
+      try {
+        await fs.access(filePath);
+        const sentMediaMsg = await client.sendFile(targetPeer, {
+          file: filePath,
+          caption: cleanText || undefined,
+        });
+
+        if (contact) {
+          await inboxService.upsert({
+            platform: "telegram",
+            externalId: `personal-${sentMediaMsg.id}`,
+            contactId: contact.id,
+            contactName: contact.name,
+            senderId: peer,
+            preview: cleanText ? cleanText.slice(0, 120) : "[File]",
+            body: text,
+            receivedAt: new Date(sentMediaMsg.date * 1000),
+            needsReply: false,
+            fromMe: true,
+          });
+        }
+        return;
+      } catch (err) {
+        console.warn(`[telegram-personal] Media file not accessible, sending as text link instead. error:`, err);
+      }
+    }
+
+    let sentMsg: any;
+    try {
+      sentMsg = await client.sendMessage(targetPeer, { message: text, replyTo });
+    } catch (err) {
+      if (isSessionExpired(err)) {
+        await clearSession(userId);
+        throw new Error("Telegram session expired — go to Settings → Telegram to reconnect.");
+      }
+      throw err;
+    }
+
+    if (contact) {
+      await inboxService.upsert({
+        platform: "telegram",
+        externalId: `personal-${sentMsg.id}`,
+        contactId: contact.id,
+        contactName: contact.name,
+        senderId: peer,
+        preview: text.slice(0, 120),
+        body: text,
+        receivedAt: new Date(sentMsg.date * 1000),
+        needsReply: false,
+        fromMe: true,
+      });
+    }
+  },
+
+  async sendOnly(userId: string, peer: string, text: string, replyTo?: number): Promise<any> {
+    const { TelegramClient, StringSession } = await getTelegramLib();
+    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
+    if (!rec?.sessionStr) throw new Error("Telegram not connected — go to Settings → Telegram to reconnect.");
+
+    let client = clients.get(userId) as any;
+    if (!client) {
+      try {
+        client = new TelegramClient(new StringSession(rec.sessionStr), rec.apiId, rec.apiHash, { connectionRetries: 3 });
+        await client.connect();
+        clients.set(userId, client);
+        telegramPersonalService._attachListener(userId, client);
+      } catch (err) {
+        if (isSessionExpired(err)) {
+          await clearSession(userId);
+          throw new Error("Telegram session expired — go to Settings → Telegram to reconnect.");
+        }
+        throw err;
+      }
+    }
+
+    let targetPeer: any = peer;
+    if (/^-?\d+$/.test(peer)) {
+      targetPeer = await resolveNumericPeer(userId, peer, client);
+    }
+
+    try {
+      return await client.sendMessage(targetPeer, { message: text, replyTo });
+    } catch (err) {
+      if (isSessionExpired(err)) {
+        await clearSession(userId);
+        throw new Error("Telegram session expired — go to Settings → Telegram to reconnect.");
+      }
+      throw err;
+    }
+  },
+
+  async disconnect(userId: string) {
+    const client = clients.get(userId) as any;
+    if (client) {
+      try { await client.disconnect(); } catch { /* ignore */ }
+      clients.delete(userId);
+    }
+    await (prisma as any).telegramPersonalSession.deleteMany({ where: { userId } });
+  },
+
+  async autoReconnect() {
+    const sessions = await (prisma as any).telegramPersonalSession.findMany();
+    for (const session of sessions) {
+      if (!session.sessionStr) continue;
+      try {
+        console.log(`[telegram-personal] Auto-reconnecting session for user ${session.userId}...`);
+        const { TelegramClient, StringSession } = await getTelegramLib();
+        const client = new TelegramClient(new StringSession(session.sessionStr), session.apiId, session.apiHash, {
+          connectionRetries: 3,
+        });
+        await client.connect();
+        clients.set(session.userId, client);
+        telegramPersonalService._attachListener(session.userId, client);
+        console.log(`[telegram-personal] Auto-reconnect successful for user ${session.userId}`);
+        // Warm entity cache in background so sends to numeric IDs work immediately
+        warmEntityCache(session.userId, client);
+      } catch (err) {
+        if (isSessionExpired(err)) {
+          console.error(`[telegram-personal] Session expired for user ${session.userId} — clearing. User must reconnect in Settings.`);
+          await clearSession(session.userId);
+        } else {
+          console.error(`[telegram-personal] Auto-reconnect failed for user ${session.userId}:`, err);
+        }
+      }
+    }
+  },
+};

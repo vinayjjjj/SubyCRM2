@@ -1,0 +1,110 @@
+import { Router } from "express";
+import { inboxService } from "../services/inbox.service";
+import { registerSSEClient, removeSSEClient } from "../services/sse.service";
+import fs from "fs/promises";
+import path from "path";
+
+const router = Router();
+
+// SSE endpoint — clients connect here and get push events when messages arrive
+router.get("/events", (req, res) => {
+  const id = `${Date.now()}-${Math.random()}`;
+  registerSSEClient(id, res);
+  req.on("close", () => removeSSEClient(id));
+});
+
+router.get("/conversations", async (_req, res, next) => {
+  try {
+    res.json(await inboxService.getConversations());
+  } catch (err) { next(err); }
+});
+
+router.get("/thread", async (req, res, next) => {
+  try {
+    const { contactId, platform } = req.query as { contactId: string; platform: string };
+    if (!contactId || !platform) { res.status(400).json({ error: "contactId and platform required" }); return; }
+    res.json(await inboxService.getThread(contactId, platform));
+  } catch (err) { next(err); }
+});
+
+// All messages for a contact across all platforms — used by contact detail view
+router.get("/contact/:contactId", async (req, res, next) => {
+  try {
+    res.json(await inboxService.getContactMessages(req.params.contactId));
+  } catch (err) { next(err); }
+});
+
+router.get("/", async (_req, res, next) => {
+  try {
+    const messages = await inboxService.getMessages({ limit: 100 });
+    res.json(messages);
+  } catch (err) { next(err); }
+});
+
+router.get("/stats", async (_req, res, next) => {
+  try {
+    res.json(await inboxService.getStats());
+  } catch (err) { next(err); }
+});
+
+router.post("/mark-read", async (req, res, next) => {
+  try {
+    const { contactId, platform } = req.body as { contactId: string; platform: string };
+    if (!contactId || !platform) { res.status(400).json({ error: "contactId and platform required" }); return; }
+    await inboxService.markConversationRead(contactId, platform);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+router.delete("/:id", async (req, res, next) => {
+  try {
+    await inboxService.deleteMessage(req.params.id);
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { read, starred, needsReply } = req.body as { read?: boolean; starred?: boolean; needsReply?: boolean };
+    res.json(await inboxService.updateMessage(req.params.id, { read, starred, needsReply }));
+  } catch (err) { next(err); }
+});
+
+router.post("/:id/reply", async (req, res, next) => {
+  try {
+    const { body, replyToId } = req.body as { body: string; replyToId?: string };
+    if (!body?.trim()) { res.status(400).json({ error: "body required" }); return; }
+    const userId = res.locals.session?.user?.id;
+    await inboxService.reply(req.params.id, body.trim(), userId, replyToId);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+router.post("/upload", async (req, res, next) => {
+  try {
+    const { filename, fileData } = req.body as { filename: string; fileData: string };
+    if (!filename || !fileData) {
+      res.status(400).json({ error: "filename and fileData required" });
+      return;
+    }
+
+    const base64Data = fileData.split(";base64,").pop();
+    if (!base64Data) {
+      res.status(400).json({ error: "Invalid base64 data format" });
+      return;
+    }
+
+    const buffer = Buffer.from(base64Data, "base64");
+    const uniqueName = `${Date.now()}_${filename.replace(/\s+/g, "_")}`;
+    const mediaDir = path.join(process.cwd(), "public", "media");
+    await fs.mkdir(mediaDir, { recursive: true });
+
+    await fs.writeFile(path.join(mediaDir, uniqueName), buffer);
+
+    res.json({ url: `/media/${uniqueName}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;

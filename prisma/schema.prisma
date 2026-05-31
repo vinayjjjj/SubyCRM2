@@ -1,0 +1,586 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  schemas   = ["contacts"]
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  @@unique([email])
+  @@map("user")
+  @@schema("contacts")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+  @@schema("contacts")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+  @@schema("contacts")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+  @@schema("contacts")
+}
+
+enum ContactType {
+  vc
+  lead
+  partner
+  friend
+  prospect
+  team
+  advisor
+  media
+  other
+  @@schema("contacts")
+}
+
+enum ContactDomain {
+  payment
+  blockchain
+  saas
+  ecommerce
+  ai
+  marketing
+  legal
+  finance
+  other
+  @@schema("contacts")
+}
+
+enum RelationshipStrength {
+  cold
+  warm
+  hot
+  @@schema("contacts")
+}
+
+enum PlatformType {
+  whatsapp
+  telegram
+  discord
+  linkedin
+  x
+  slack
+  email
+  matrix
+  @@schema("contacts")
+}
+
+enum ImportJobStatus {
+  pending
+  running
+  completed
+  failed
+  @@schema("contacts")
+}
+
+enum ImportSource {
+  beeper
+  matrix
+  whatsapp_export
+  telegram_api
+  discord_api
+  slack_api
+  manual
+  @@schema("contacts")
+}
+
+enum ReminderStatus {
+  pending
+  done
+  dismissed
+  @@schema("contacts")
+}
+
+model Company {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  domain      String?  // website domain
+  sector      String?
+  size        String?  // startup, scaleup, enterprise
+  funding     String?  // seed, series-a, etc.
+  linkedin    String?
+  website     String?
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  contacts Contact[]
+
+  @@index([name])
+  @@map("companies")
+  @@schema("contacts")
+}
+
+model Reminder {
+  id        String         @id @default(uuid())
+  contactId String         @map("contact_id")
+  content   String
+  dueDate   DateTime       @map("due_date")
+  status    ReminderStatus @default(pending)
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueDate])
+  @@index([contactId])
+  @@map("reminders")
+  @@schema("contacts")
+}
+
+model Contact {
+  id                   String               @id @default(uuid())
+  name                 String
+  avatar               String?
+  type                 ContactType          @default(other)
+  domain               ContactDomain        @default(other)
+  companyId            String?              @map("company_id")
+  company              String?              // legacy text field, migrating to Company relation
+  role                 String?
+  relationshipStrength RelationshipStrength @default(cold) @map("relationship_strength")
+  aiSummary            String?              @map("ai_summary")
+  lastContactDate      DateTime?            @map("last_contact_date")
+  firstContactDate     DateTime?            @map("first_contact_date")
+  contactFrequency     Int?                 @map("contact_frequency")
+  createdAt            DateTime             @default(now()) @map("created_at")
+  updatedAt            DateTime             @updatedAt @map("updated_at")
+
+  companyRef   Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  platforms    Platform[]
+  interactions Interaction[]
+  notes        Note[]
+  contactTags  ContactTag[]
+  reminders    Reminder[]
+
+  @@index([type])
+  @@index([domain])
+  @@index([relationshipStrength])
+  @@index([lastContactDate])
+  @@index([name])
+  @@map("contacts")
+  @@schema("contacts")
+}
+
+model Platform {
+  id          String       @id @default(uuid())
+  contactId   String       @map("contact_id")
+  type        PlatformType
+  platformId  String       @map("platform_id")
+  displayName String?      @map("display_name")
+  profileUrl  String?      @map("profile_url")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([type, platformId])
+  @@index([contactId])
+  @@map("platforms")
+  @@schema("contacts")
+}
+
+model Interaction {
+  id             String       @id @default(uuid())
+  contactId      String       @map("contact_id")
+  platform       PlatformType
+  direction      String       // inbound | outbound
+  contentSnippet String?      @map("content_snippet")
+  messageCount   Int          @default(1) @map("message_count")
+  occurredAt     DateTime     @map("occurred_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, occurredAt])
+  @@index([occurredAt])
+  @@map("interactions")
+  @@schema("contacts")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  contactId String   @map("contact_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@map("notes")
+  @@schema("contacts")
+}
+
+model Tag {
+  id        String       @id @default(uuid())
+  name      String       @unique
+  color     String?
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  contactTags ContactTag[]
+
+  @@map("tags")
+  @@schema("contacts")
+}
+
+model ContactTag {
+  id        String   @id @default(uuid())
+  contactId String   @map("contact_id")
+  tagId     String   @map("tag_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tagId])
+  @@map("contact_tags")
+  @@schema("contacts")
+}
+
+model ImportJob {
+  id           String          @id @default(uuid())
+  source       ImportSource
+  status       ImportJobStatus @default(pending)
+  totalFound   Int?            @map("total_found")
+  imported     Int?            @default(0)
+  deduplicated Int?            @default(0)
+  errors       Int?            @default(0)
+  errorLog     Json?           @map("error_log")
+  config       Json?
+  startedAt    DateTime?       @map("started_at")
+  completedAt  DateTime?       @map("completed_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("import_jobs")
+  @@schema("contacts")
+}
+
+model GoogleCalendarToken {
+  id           String    @id @default(uuid())
+  userId       String    @unique @map("user_id")
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  expiresAt    DateTime? @map("expires_at")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("google_calendar_tokens")
+  @@schema("contacts")
+}
+
+model CalendarEvent {
+  id          String   @id @default(uuid())
+  googleId    String   @unique @map("google_id")
+  title       String
+  start       DateTime
+  end         DateTime
+  contactId   String?  @map("contact_id")
+  contactName String?  @map("contact_name")
+  channel     String   @default("meet")
+  location    String?
+  description String?
+  htmlLink    String?  @map("html_link")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([start])
+  @@map("calendar_events")
+  @@schema("contacts")
+}
+
+model VoiceCapture {
+  id           String   @id @default(uuid())
+  transcript   String
+  contactId    String?  @map("contact_id")
+  contactName  String?  @map("contact_name")
+  action       String   // note | reminder | strength | new_contact | unknown
+  content      String?  // note body / reminder text
+  dueDate      DateTime? @map("due_date")
+  strength     String?  // hot | warm | cold
+  status       String   @default("processed") // processed | failed
+  processingMs Int?     @map("processing_ms")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("voice_captures")
+  @@schema("contacts")
+}
+
+model GmailToken {
+  id           String    @id @default(uuid())
+  userId       String    @unique @map("user_id")
+  accessToken  String    @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  expiresAt    DateTime? @map("expires_at")
+  lastSyncAt   DateTime? @map("last_sync_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@map("gmail_tokens")
+  @@schema("contacts")
+}
+
+model GmailThread {
+  id           String   @id @default(uuid())
+  threadId     String   @unique @map("thread_id")
+  subject      String?
+  snippet      String?
+  contactId    String?  @map("contact_id")
+  contactEmail String?  @map("contact_email")
+  fromEmail    String?  @map("from_email")
+  lastDate     DateTime @map("last_date")
+  messageCount Int      @default(1) @map("message_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([contactId])
+  @@index([lastDate])
+  @@map("gmail_threads")
+  @@schema("contacts")
+}
+
+model InboxMessage {
+  id          String       @id @default(uuid())
+  platform    PlatformType
+  externalId  String       @map("external_id")
+  contactId   String?      @map("contact_id")
+  contactName String?      @map("contact_name")
+  senderId    String?      @map("sender_id")
+  preview     String?
+  body        String?
+  fromMe      Boolean      @default(false) @map("from_me")
+  read        Boolean      @default(false)
+  starred     Boolean      @default(false)
+  needsReply  Boolean      @default(false)
+  receivedAt  DateTime     @map("received_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@unique([platform, externalId])
+  @@index([receivedAt])
+  @@index([contactId])
+  @@map("inbox_messages")
+  @@schema("contacts")
+}
+
+model DiscordToken {
+  id            String    @id @default(uuid())
+  userId        String    @unique @map("user_id")
+  botToken      String?   @map("bot_token")
+  discordUserId String?   @map("discord_user_id")
+  username      String?
+  lastSyncAt    DateTime? @map("last_sync_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("discord_tokens")
+  @@schema("contacts")
+}
+
+model SlackToken {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  accessToken String    @map("access_token")
+  teamId      String?   @map("team_id")
+  teamName    String?   @map("team_name")
+  lastSyncAt  DateTime? @map("last_sync_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("slack_tokens")
+  @@schema("contacts")
+}
+
+model XToken {
+  id                String    @id @default(uuid())
+  userId            String    @unique @map("user_id")
+  accessToken       String    @map("access_token")
+  accessTokenSecret String    @map("access_token_secret")
+  screenName        String?   @map("screen_name")
+  lastSyncAt        DateTime? @map("last_sync_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("x_tokens")
+  @@schema("contacts")
+}
+
+model WhatsAppSession {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  phoneNumber String?   @map("phone_number")
+  connected   Boolean   @default(false)
+  lastSyncAt  DateTime? @map("last_sync_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("whatsapp_sessions")
+  @@schema("contacts")
+}
+
+model TelegramPersonalSession {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  apiId       Int?      @map("api_id")
+  apiHash     String?   @map("api_hash")
+  phoneNumber String?   @map("phone_number")
+  sessionStr  String?   @map("session_str")
+  connected   Boolean   @default(false)
+  lastSyncAt  DateTime? @map("last_sync_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("telegram_personal_sessions")
+  @@schema("contacts")
+}
+
+model LinkedInToken {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  accessToken String    @map("access_token")
+  profileId   String?   @map("profile_id")
+  profileName String?   @map("profile_name")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("linkedin_tokens")
+  @@schema("contacts")
+}
+
+// ─── Sequences ───────────────────────────────────────────────────────────────
+
+enum SequenceStatus {
+  active
+  paused
+  completed
+
+  @@schema("contacts")
+}
+
+enum SequenceStepType {
+  email
+  linkedin_message
+  twitter_dm
+  telegram_message
+  whatsapp_message
+  wait
+  task
+
+  @@schema("contacts")
+}
+
+enum EnrollmentStatus {
+  active
+  paused
+  completed
+  exited
+
+  @@schema("contacts")
+}
+
+model Sequence {
+  id          String         @id @default(uuid())
+  name        String
+  description String?
+  status      SequenceStatus @default(active)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  steps       SequenceStep[]
+  enrollments SequenceEnrollment[]
+
+  @@map("sequences")
+  @@schema("contacts")
+}
+
+model SequenceStep {
+  id         String           @id @default(uuid())
+  sequenceId String           @map("sequence_id")
+  stepNumber Int              @map("step_number")
+  type       SequenceStepType
+  delayDays  Int              @default(0) @map("delay_days")
+  subject    String?
+  body       String?
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  sequence Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@index([sequenceId])
+  @@map("sequence_steps")
+  @@schema("contacts")
+}
+
+model SequenceEnrollment {
+  id          String           @id @default(uuid())
+  sequenceId  String           @map("sequence_id")
+  contactId   String           @map("contact_id")
+  currentStep Int              @default(0) @map("current_step")
+  status      EnrollmentStatus @default(active)
+  nextStepDue DateTime?        @map("next_step_due")
+  enrolledAt  DateTime         @default(now()) @map("enrolled_at")
+  completedAt DateTime?        @map("completed_at")
+
+  sequence Sequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, contactId])
+  @@index([status, nextStepDue])
+  @@map("sequence_enrollments")
+  @@schema("contacts")
+}

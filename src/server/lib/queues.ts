@@ -1,0 +1,36 @@
+import { Queue } from "bullmq";
+import { redisConnection } from "./redis";
+
+export const QUEUE_NAMES = {
+  AI_CLASSIFY: "ai-classify",
+  AI_SUMMARY: "ai-summary",
+  AI_PREP: "ai-prep",
+  VOICE_CAPTURE: "voice-capture",
+  ENRICH_CONTACT: "enrich-contact",
+  SEQUENCE_TICK: "sequence-tick",
+  DAILY_BRIEF: "daily-brief",
+  OUTCOME_PROMPT: "outcome-prompt",
+  GMAIL_SYNC: "gmail-sync",
+  X_DM_SYNC: "x-dm-sync",
+} as const;
+
+export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
+
+export const queues = {
+  aiClassify: new Queue(QUEUE_NAMES.AI_CLASSIFY, redisConnection),
+  aiSummary: new Queue(QUEUE_NAMES.AI_SUMMARY, redisConnection),
+  aiPrep: new Queue(QUEUE_NAMES.AI_PREP, redisConnection),
+  voiceCapture: new Queue(QUEUE_NAMES.VOICE_CAPTURE, redisConnection),
+  enrichContact: new Queue(QUEUE_NAMES.ENRICH_CONTACT, redisConnection),
+  sequenceTick: new Queue(QUEUE_NAMES.SEQUENCE_TICK, redisConnection),
+  dailyBrief: new Queue(QUEUE_NAMES.DAILY_BRIEF, redisConnection),
+  outcomePrompt: new Queue(QUEUE_NAMES.OUTCOME_PROMPT, redisConnection),
+  gmailSync: new Queue(QUEUE_NAMES.GMAIL_SYNC, redisConnection),
+  xDmSync: new Queue(QUEUE_NAMES.X_DM_SYNC, redisConnection),
+};
+
+/** Default job options for all queues */
+export const DEFAULT_JOB_OPTIONS = {
+  attempts: 3,
+  backoff: { type: "exponential" as const, delay: 2000 },
+};
