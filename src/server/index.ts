@@ -6,16 +6,12 @@ process.on("unhandledRejection", (err) => {
   console.error("[unhandledRejection]", err);
 });
 
-// Graceful shutdown: flush sessions and stop long-polls
+// Graceful shutdown: stop Beeper long-polls
 async function gracefulShutdown(signal: string) {
   console.log(`[server] ${signal} received — shutting down`);
   try {
     const { beeperService } = await import("./services/beeper.service");
     beeperService.stopAllLongPolls();
-  } catch {}
-  try {
-    const { flushWhatsAppSessions } = await import("./services/whatsapp.service");
-    await flushWhatsAppSessions();
   } catch {}
   process.exit(0);
 }
@@ -42,12 +38,8 @@ import { calendarRouter, calendarCallbackRouter } from "./routes/calendar.routes
 import { gmailRouter, gmailCallbackRouter } from "./routes/gmail.routes";
 import { voiceRouter } from "./routes/voice.routes";
 import inboxRouter from "./routes/inbox.routes";
-import discordRouter, { discordCallbackRouter } from "./routes/discord.routes";
-import slackRouter, { slackCallbackRouter } from "./routes/slack.routes";
 import { emailRouter } from "./routes/email.routes";
 import xRouter, { xCallbackRouter } from "./routes/x.routes";
-import whatsappRouter from "./routes/whatsapp.routes";
-import telegramPersonalRouter from "./routes/telegram-personal.routes";
 import linkedinRouter, { linkedinCallbackRouter } from "./routes/linkedin.routes";
 import sequenceRouter from "./routes/sequence.routes";
 import pipelineRouter from "./routes/pipeline.routes";
@@ -97,10 +89,8 @@ console.log("[bull-board] Dashboard at http://localhost:4002/admin/queues");
 app.all("/api/auth/{*any}", toNodeHandler(auth));
 app.use("/api/calendar", calendarCallbackRouter); // callback must bypass requireAuth
 app.use("/api/gmail", gmailCallbackRouter);       // callback must bypass requireAuth
-app.use("/api/slack", slackCallbackRouter);       // callback must bypass requireAuth
 app.use("/api/x", xCallbackRouter);              // callback must bypass requireAuth
 app.use("/api/linkedin", linkedinCallbackRouter); // callback must bypass requireAuth
-app.use("/api/discord", discordCallbackRouter);   // callback must bypass requireAuth
 app.use("/api/matrix", matrixRouter);             // Matrix appservice webhook — no user auth
 
 // ─── Auth-gated media files (WA/Telegram attachments) ────────────────────────
@@ -173,12 +163,8 @@ app.use("/api/calendar", calendarRouter);
 app.use("/api/gmail", gmailRouter);
 app.use("/api/voice", voiceRouter);
 app.use("/api/inbox", inboxRouter);
-app.use("/api/discord", discordRouter);
 app.use("/api/email", emailRouter);
-app.use("/api/slack", slackRouter);
 app.use("/api/x", xRouter);
-app.use("/api/whatsapp", whatsappRouter);
-app.use("/api/telegram-personal", telegramPersonalRouter);
 app.use("/api/linkedin", linkedinRouter);
 app.use("/api/beeper", beeperRouter);
 app.use("/api/sequences", sequenceRouter);
@@ -197,17 +183,6 @@ cron.schedule("0 8 * * *", () => runStaleCheck().catch(console.error));
 import { startBot } from "./services/telegram-bot.service";
 startBot();
 
-// ─── WhatsApp auto-reconnect ─────────────────────────────────
-import { whatsappService } from "./services/whatsapp.service";
-whatsappService.autoReconnect();
-
-// ─── Discord auto-reconnect ───────────────────────────────────
-import { discordService } from "./services/discord.service";
-discordService.autoReconnect();
-
-// ─── Slack socket auto-reconnect ──────────────────────────────
-import { slackService } from "./services/slack.service";
-slackService.autoReconnect();
 
 // ─── Start server ────────────────────────────────────────────
 app.listen(PORT, async () => {
@@ -346,20 +321,6 @@ app.listen(PORT, async () => {
     } catch { /* already nullable */ }
   })();
 
-  // ── Schema migration: WhatsApp creds_json + auth_files_json columns ───────────────
-  void (async () => {
-    try {
-      const { prisma } = await import("./lib/prisma");
-      await prisma.$executeRawUnsafe(`
-        ALTER TABLE contacts.whatsapp_sessions
-        ADD COLUMN IF NOT EXISTS creds_json TEXT,
-        ADD COLUMN IF NOT EXISTS auth_files_json TEXT
-      `);
-      console.log("[startup] WhatsApp session columns OK");
-    } catch (e: any) {
-      console.error("[startup] WhatsApp session column migration error:", e.message);
-    }
-  })();
 
   // ── Backfill: link contacts to companies by name string ────────
   // Contacts created from the contacts page have company: "Acme" but no companyId.
@@ -492,38 +453,6 @@ app.listen(PORT, async () => {
     }
   })();
 
-  // ── Backfill: unlink Slack/Discord messages wrongly attributed via name matching ──
-  // The name-contains fallback in contact resolution caused messages from one person
-  // to be attributed to a different CRM contact with a similar first name.
-  // Fix: unlink any message where the contact has no platform of that type.
-  void (async () => {
-    try {
-      const { prisma } = await import("./lib/prisma");
-      for (const platform of ["slack", "discord"] as const) {
-        const msgs = await (prisma as any).inboxMessage.findMany({
-          where: { platform, contactId: { not: null } },
-          select: { id: true, contactId: true },
-        });
-        if (msgs.length === 0) continue;
-        const contactIds = [...new Set(msgs.map((m: any) => m.contactId as string))];
-        const platRecords = await prisma.platform.findMany({
-          where: { type: platform, contactId: { in: contactIds } },
-          select: { contactId: true },
-        });
-        const validContactIds = new Set(platRecords.map((p) => p.contactId));
-        const badIds = msgs.filter((m: any) => !validContactIds.has(m.contactId)).map((m: any) => m.id);
-        if (badIds.length > 0) {
-          await (prisma as any).inboxMessage.updateMany({
-            where: { id: { in: badIds } },
-            data: { contactId: null },
-          });
-          console.log(`[startup] Unlinked ${badIds.length} ${platform} message(s) wrongly attributed via name match`);
-        }
-      }
-    } catch (e: any) {
-      console.error("[startup] Platform mismatch fix error:", e.message);
-    }
-  })();
 
   // ── Backfill: strip HTML from existing inbox messages (LinkedIn, WA bots, Telegram) ──
   void (async () => {
@@ -564,9 +493,6 @@ app.listen(PORT, async () => {
   })();
 
   // X (Twitter) uses scheduled BullMQ sync — no persistent socket to reconnect
-
-  const { telegramPersonalService } = await import("./services/telegram-personal.service");
-  telegramPersonalService.autoReconnect();
 
   // ── BullMQ workers ──────────────────────────────────────────
   const { startAllWorkers } = await import("./workers/index");
@@ -622,27 +548,6 @@ app.listen(PORT, async () => {
   );
   console.log("[server] X DM sync scheduled every 2 minutes");
 
-  // ── BullMQ: Slack DM sync every 5 minutes ──────────────────
-  await queues.slackSync
-    .removeRepeatable("slack-sync", { cron: "*/5 * * * *" })
-    .catch(() => {});
-  await queues.slackSync.add(
-    "slack-sync",
-    {},
-    { repeat: { cron: "*/5 * * * *" }, ...DEFAULT_JOB_OPTIONS },
-  );
-  console.log("[server] Slack sync scheduled every 5 minutes");
-
-  // ── BullMQ: Discord sync every 5 minutes (DMs arrive via bot listener) ─
-  await queues.discordSync
-    .removeRepeatable("discord-sync", { cron: "*/5 * * * *" })
-    .catch(() => {});
-  await queues.discordSync.add(
-    "discord-sync",
-    {},
-    { repeat: { cron: "*/5 * * * *" }, ...DEFAULT_JOB_OPTIONS },
-  );
-  console.log("[server] Discord sync scheduled every 5 minutes");
 
   // ── BullMQ: LinkedIn sync every 12 hours (not active yet) ──
   await queues.linkedinSync

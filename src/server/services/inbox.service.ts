@@ -122,17 +122,6 @@ export const inboxService = {
       where: { userId, contactId, platform, read: false },
       data: { read: true },
     });
-    if (platform === "whatsapp" && result.count > 0) {
-      try {
-        const p = await prisma.platform.findFirst({ where: { contactId, type: "whatsapp" } });
-        if (p) {
-          const jid = p.platformId.includes("@") ? p.platformId : `${p.platformId}@s.whatsapp.net`;
-          const { whatsappService } = await import("./whatsapp.service");
-          void whatsappService.markAsRead(jid, userId).catch(() => {});
-          void whatsappService.subscribePresence(jid, userId).catch(() => {});
-        }
-      } catch {}
-    }
     return result;
   },
 
@@ -168,30 +157,7 @@ export const inboxService = {
       return;
     }
 
-    if (msg.platform === "whatsapp") {
-      let jid: string | null = null;
-      if (msg.contactId) {
-        const p = await prisma.platform.findFirst({ where: { contactId: msg.contactId, type: "whatsapp" } });
-        if (p) jid = p.platformId.includes("@") ? p.platformId : `${p.platformId}@s.whatsapp.net`;
-      }
-      if (!jid && msg.senderId && !msg.senderId.endsWith("@lid")) jid = msg.senderId;
-      if (!jid) throw new Error("Cannot resolve WhatsApp JID for this contact");
-      const { whatsappService } = await import("./whatsapp.service");
-      await whatsappService.sendReaction(jid, msg.externalId, !!msg.fromMe, emoji, userId ?? "default");
-
-    } else if (msg.platform === "telegram") {
-      const msgId = parseInt(msg.externalId.replace("personal-", ""), 10);
-      if (isNaN(msgId)) throw new Error("Cannot parse Telegram message ID");
-      let peer = msg.senderId;
-      if (!peer && msg.contactId) {
-        const p = await prisma.platform.findFirst({ where: { contactId: msg.contactId, type: "telegram" } });
-        peer = p?.platformId ?? null;
-      }
-      if (!peer) throw new Error("Cannot resolve Telegram chat ID");
-      const { telegramPersonalService } = await import("./telegram-personal.service");
-      await telegramPersonalService.sendReaction(userId ?? "default", peer, msgId, emoji);
-    }
-    // LinkedIn, Slack, Discord, email — reactions not supported by their APIs
+    // Non-Beeper messages cannot react (Beeper path handled above)
   },
 
   async upsert(data: {
@@ -320,7 +286,7 @@ export const inboxService = {
       body: text,
       receivedAt: new Date(),
       fromMe: true,
-      waStatus: msg.platform === "whatsapp" ? "sent" : null,
+      waStatus: null,
       quotedId: quotedOriginal?.externalId ?? null,
       quotedBody: quotedOriginal?.body ?? quotedOriginal?.preview ?? null,
       quotedFromMe: quotedOriginal != null ? !!quotedOriginal.fromMe : null,
@@ -328,12 +294,8 @@ export const inboxService = {
 
     // ── Actually resolve and send in background — never blocks the HTTP response ─────────────
     void (async () => {
-      // Declared outside try so the catch block can read them for BullMQ retry
-      let jid: string | null = null;
       let telegramChatId: string | null = null;
       let toEmail: string | null = null;
-      let discordChannelId: string | undefined;
-      let slackChannelId: string | undefined;
 
       try {
         // ── Resolve destination in background ─────────────────────────────────────────
@@ -395,37 +357,6 @@ export const inboxService = {
               where: { platform: msg.platform, externalId: tempId, userId: userId ?? "default" },
             }).catch(() => {});
           }
-        } else if (msg.platform === "whatsapp") {
-          // Prefer phone-based JID from the platform record — avoids @lid format which
-          // Baileys may not be able to resolve without a full contact sync
-          if (msg.contactId) {
-            const p = await prisma.platform.findFirst({ where: { contactId: msg.contactId, type: "whatsapp" } });
-            if (p) jid = p.platformId.includes("@") ? p.platformId : `${p.platformId}@s.whatsapp.net`;
-          }
-          // Fall back to senderId (may be @s.whatsapp.net or @lid — Baileys handles @s.whatsapp.net reliably)
-          if (!jid && msg.senderId && !msg.senderId.endsWith("@lid")) jid = msg.senderId;
-          // If senderId is @lid, strip to phone digits and build proper JID
-          if (!jid && msg.senderId?.endsWith("@lid")) {
-            const { resolveJid } = await import("./whatsapp.service");
-            jid = resolveJid(msg.senderId) ?? msg.senderId;
-          }
-          if (jid) {
-            const { resolveJid } = await import("./whatsapp.service");
-            jid = resolveJid(jid) ?? jid;
-          }
-
-          // Last resort: if jid is still @lid (unresolvable), scan incoming messages from this
-          // contact to find a proper @s.whatsapp.net JID that Baileys can actually send to
-          if (jid?.endsWith("@lid") && msg.contactId) {
-            const incoming = await (prisma as any).inboxMessage.findFirst({
-              where: { contactId: msg.contactId, platform: "whatsapp", fromMe: false, senderId: { contains: "@s.whatsapp.net" } },
-              orderBy: { receivedAt: "desc" },
-            });
-            if (incoming?.senderId) {
-              jid = incoming.senderId;
-              console.log(`[inbox] Resolved @lid via incoming message senderId → ${jid}`);
-            }
-          }
         } else if (msg.platform === "telegram") {
           telegramChatId = msg.senderId ?? null;
           // Fall back: scan thread for a message from the same contact that has a senderId
@@ -453,24 +384,12 @@ export const inboxService = {
           // Fall back to contactName (syncThreads stores contactEmail there)
           if (!toEmail && msg.contactName?.includes("@")) toEmail = msg.contactName;
           if (!toEmail) throw new Error("No email address found for this contact");
-        } else if (msg.platform === "slack") {
-          const channelId = msg.senderId;
-          if (!channelId) throw new Error("No Slack channel ID found — try syncing Slack in Settings");
-          const { slackService } = await import("./slack.service");
-          await slackService.sendMessage(userId!, channelId, text);
-          slackChannelId = channelId;
-        } else if (msg.platform === "discord") {
-          const channelId = msg.senderId;
-          if (!channelId) throw new Error("No Discord channel ID found — try syncing Discord in Settings");
-          const { discordService } = await import("./discord.service");
-          await discordService.sendMessage(userId!, channelId, text);
-          discordChannelId = channelId;
         } else {
           throw new Error(`Sending via ${msg.platform} is not yet supported`);
         }
 
         // Update the message in DB to have the correct resolved destination
-        const resolvedSenderId = jid ?? telegramChatId ?? toEmail ?? slackChannelId ?? discordChannelId ?? undefined;
+        const resolvedSenderId = telegramChatId ?? toEmail ?? undefined;
         if (resolvedSenderId) {
           await (prisma as any).inboxMessage.updateMany({
             where: { platform: msg.platform, externalId: tempId },
@@ -478,104 +397,9 @@ export const inboxService = {
           });
         }
 
-        if (msg.platform === "whatsapp" && jid) {
-          const { whatsappService } = await import("./whatsapp.service");
-          const media = parseMediaMarkdown(text);
-          if (media) {
-            const { ensureMediaLocal } = await import("../lib/media-store");
-            await ensureMediaLocal(media.filePath);
-          }
-          // Build quoted message object for WA reply threading
-          let quotedMsg: any;
-          if (replyToId) {
-            const orig = await (prisma as any).inboxMessage.findUnique({ where: { id: replyToId } });
-            if (orig?.externalId) {
-              quotedMsg = {
-                key: { id: orig.externalId, fromMe: !!orig.fromMe, remoteJid: jid },
-                message: { conversation: orig.body || orig.preview || "" },
-              };
-            }
-          }
-          let sentMsg: unknown;
-          if (media) {
-            try {
-              sentMsg = await whatsappService.sendMediaMessage(jid, media.filePath, media.caption, userId ?? "default");
-            } catch (mediaErr: any) {
-              // If media send fails for a non-reconnect reason (bad format, file missing, etc.),
-              // send just the caption as text so WhatsApp doesn't receive raw markdown
-              const isReconnect = mediaErr?.message?.includes("reconnecting") || mediaErr?.message?.includes("not connected");
-              if (isReconnect) throw mediaErr; // rethrow so outer catch can queue BullMQ retry
-              const fallbackText = media.caption || "";
-              if (fallbackText) {
-                sentMsg = await whatsappService.sendMessage(jid, fallbackText, userId ?? "default", quotedMsg);
-              }
-            }
-          } else {
-            sentMsg = await whatsappService.sendMessage(jid, text, userId ?? "default", quotedMsg);
-          }
-          // Update temp ID to real Baileys message ID so we don't get a duplicate from the echo
-          const realId = (sentMsg as any)?.key?.id;
-          if (realId) {
-            await (prisma as any).inboxMessage.updateMany({
-              where: { platform: "whatsapp", externalId: tempId },
-              data: { externalId: realId },
-            });
-          }
-        } else if (msg.platform === "telegram" && telegramChatId) {
-          // Resolve Telegram reply-to message ID
-          let replyToTelegramId: number | undefined;
-          if (replyToId) {
-            const replyToMsg = await (prisma as any).inboxMessage.findUnique({ where: { id: replyToId } });
-            if (replyToMsg?.externalId?.startsWith("personal-")) {
-              const parsed = parseInt(replyToMsg.externalId.replace("personal-", ""), 10);
-              if (!isNaN(parsed)) replyToTelegramId = parsed;
-            }
-          }
-
-          // Determine if we should send via Telegram Personal or Bot
-          const resolvedUserId = userId ?? "default";
-          let isPersonal = false;
-          if (msg.externalId?.startsWith("personal-")) {
-            isPersonal = true;
-          } else if (msg.externalId?.startsWith("bot-")) {
-            isPersonal = false;
-          } else {
-            if (msg.contactId) {
-              const personalMsg = await (prisma as any).inboxMessage.findFirst({
-                where: {
-                  contactId: msg.contactId,
-                  platform: "telegram",
-                  externalId: { startsWith: "personal-" }
-                }
-              });
-              if (personalMsg) {
-                isPersonal = true;
-              } else {
-                const { telegramPersonalService } = await import("./telegram-personal.service");
-                const personalSession = await (prisma as any).telegramPersonalSession.findUnique({
-                  where: { userId: resolvedUserId }
-                });
-                if (personalSession?.connected) {
-                  isPersonal = true;
-                }
-              }
-            }
-          }
-
-          if (isPersonal) {
-            const { telegramPersonalService } = await import("./telegram-personal.service");
-            const sentMsg = await telegramPersonalService.sendOnly(resolvedUserId, telegramChatId, text, replyToTelegramId);
-            const realId = sentMsg?.id;
-            if (realId) {
-              await (prisma as any).inboxMessage.updateMany({
-                where: { platform: "telegram", externalId: tempId },
-                data: { externalId: `personal-${realId}` },
-              });
-            }
-          } else {
-            const { sendBotReply } = await import("./telegram-bot.service");
-            await sendBotReply(telegramChatId, text);
-          }
+        if (msg.platform === "telegram" && telegramChatId) {
+          const { sendBotReply } = await import("./telegram-bot.service");
+          await sendBotReply(telegramChatId, text);
         } else if (msg.platform === "email" && toEmail) {
           const originalSubject = msg.preview ?? "";
           const subject = originalSubject.match(/^re:/i) ? originalSubject : `Re: ${originalSubject}`;
@@ -610,23 +434,6 @@ export const inboxService = {
           });
         }
       } catch (err: any) {
-        // If WA is reconnecting (not permanently disconnected) and JID is resolved,
-        // queue a BullMQ retry job instead of immediately marking failed.
-        const isReconnecting = err?.message?.includes("reconnecting") || err?.message?.includes("not connected — retrying");
-        if (msg.platform === "whatsapp" && jid && isReconnecting) {
-          try {
-            const { queues } = await import("../lib/queues");
-            await queues.whatsappSend.add(
-              "send",
-              { userId: userId ?? "default", jid, text, tempId, contactId: msg.contactId },
-              { attempts: 10, backoff: { type: "exponential", delay: 20_000 }, removeOnComplete: 100, removeOnFail: 50 }
-            );
-            console.log(`[inbox] WA reconnecting — queued send retry for ${jid} (tempId=${tempId})`);
-            return;
-          } catch (qErr) {
-            console.error("[inbox] Failed to queue WA send retry:", qErr);
-          }
-        }
         const errMsg = err?.message ?? "Unknown error";
         console.error(`[inbox] Background send failed (${msg.platform}):`, err);
         broadcastInboxEvent("send_failed", { platform: msg.platform, tempId, contactId: msg.contactId, error: errMsg });

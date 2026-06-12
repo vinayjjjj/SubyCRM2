@@ -469,34 +469,6 @@ model InboxMessage {
   @@schema("contacts")
 }
 
-model DiscordToken {
-  id            String    @id @default(uuid())
-  userId        String    @unique @map("user_id")
-  botToken      String?   @map("bot_token")
-  discordUserId String?   @map("discord_user_id")
-  username      String?
-  lastSyncAt    DateTime? @map("last_sync_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-  @@map("discord_tokens")
-  @@schema("contacts")
-}
-
-model SlackToken {
-  id          String    @id @default(uuid())
-  userId      String    @unique @map("user_id")
-  accessToken String    @map("access_token")
-  teamId      String?   @map("team_id")
-  teamName    String?   @map("team_name")
-  lastSyncAt  DateTime? @map("last_sync_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  @@map("slack_tokens")
-  @@schema("contacts")
-}
-
 model XToken {
   id                String    @id @default(uuid())
   userId            String    @unique @map("user_id")
@@ -511,37 +483,6 @@ model XToken {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   @@map("x_tokens")
-  @@schema("contacts")
-}
-
-model WhatsAppSession {
-  id          String    @id @default(uuid())
-  userId      String    @unique @map("user_id")
-  phoneNumber String?   @map("phone_number")
-  connected   Boolean   @default(false)
-  lastSyncAt  DateTime? @map("last_sync_at")
-  credsJson       String?   @map("creds_json") @db.Text
-  authFilesJson   String?   @map("auth_files_json") @db.Text
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  @@map("whatsapp_sessions")
-  @@schema("contacts")
-}
-
-model TelegramPersonalSession {
-  id          String    @id @default(uuid())
-  userId      String    @unique @map("user_id")
-  apiId       Int?      @map("api_id")
-  apiHash     String?   @map("api_hash")
-  phoneNumber String?   @map("phone_number")
-  sessionStr  String?   @map("session_str")
-  connected   Boolean   @default(false)
-  lastSyncAt  DateTime? @map("last_sync_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  @@map("telegram_personal_sessions")
   @@schema("contacts")
 }
 

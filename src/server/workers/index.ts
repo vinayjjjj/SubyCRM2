@@ -9,15 +9,8 @@ import { startDailyBriefWorker } from "./daily-brief.worker";
 import { startOutcomePromptWorker } from "./outcome-prompt.worker";
 import { startGmailSyncWorker } from "./gmail-sync.worker";
 import { startXDmSyncWorker } from "./x-dm-sync.worker";
-import { startSlackSyncWorker } from "./slack-sync.worker";
-import { startDiscordSyncWorker } from "./discord-sync.worker";
 import { startCsvImportWorker } from "./csv-import.worker";
 import { startLinkedInSyncWorker } from "./linkedin-sync.worker";
-import { startWhatsAppImportWorker } from "./whatsapp-import.worker";
-import { startTelegramImportWorker } from "./telegram-import.worker";
-import { startDiscordImportWorker } from "./discord-import.worker";
-import { startSlackImportWorker } from "./slack-import.worker";
-import { startWhatsAppSendWorker } from "./whatsapp-send.worker";
 import { startBeeperSyncWorker } from "./beeper-sync.worker";
 
 let workers: Worker[] = [];
@@ -36,15 +29,8 @@ export function startAllWorkers() {
     startOutcomePromptWorker(),
     startGmailSyncWorker(),
     startXDmSyncWorker(),
-    startSlackSyncWorker(),
-    startDiscordSyncWorker(),
     startCsvImportWorker(),
     startLinkedInSyncWorker(),
-    startWhatsAppImportWorker(),
-    startTelegramImportWorker(),
-    startDiscordImportWorker(),
-    startSlackImportWorker(),
-    startWhatsAppSendWorker(),
     startBeeperSyncWorker(),
   ];
 
