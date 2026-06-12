@@ -70,8 +70,12 @@ export function DashboardView() {
   const [weeklyPulse, setWeeklyPulse] = useState({ calls: 0, hot: 0, newContacts: 0 });
   const [alerts, setAlerts] = useState<AlertApi[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(true);
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("suby_dismissed_alerts") ?? "[]")); } catch { return new Set(); }
+  });
+  const [outcomes, setOutcomes] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem("suby_call_outcomes") ?? "{}"); } catch { return {}; }
+  });
   const [expandedDraft, setExpandedDraft] = useState<string | null>(null);
 
   useEffect(() => {
@@ -140,7 +144,11 @@ export function DashboardView() {
   };
 
   const logOutcome = (event: CalendarEventApi, outcome: string) => {
-    setOutcomes((prev) => ({ ...prev, [event.id]: outcome }));
+    setOutcomes((prev) => {
+      const next = { ...prev, [event.id]: outcome };
+      try { localStorage.setItem("suby_call_outcomes", JSON.stringify(next)); } catch {}
+      return next;
+    });
     const strength = OUTCOME_TO_STRENGTH[outcome];
     if (!event.contactId || !strength) return;
     contactsApi.update(event.contactId, {
@@ -260,7 +268,11 @@ export function DashboardView() {
               <ReachOutRow key={a.contactId} alert={a} last={idx === Math.min(visibleAlerts.length, 4) - 1}
                 expanded={expandedDraft === a.contactId}
                 onToggle={() => setExpandedDraft(expandedDraft === a.contactId ? null : a.contactId)}
-                onSkip={() => setDismissed((prev) => new Set(prev).add(a.contactId))} />
+                onSkip={() => setDismissed((prev) => {
+                  const next = new Set(prev).add(a.contactId);
+                  try { localStorage.setItem("suby_dismissed_alerts", JSON.stringify([...next])); } catch {}
+                  return next;
+                })} />
             ))}
           </div>
         )}
