@@ -37,16 +37,8 @@ router.get("/thread-more", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post("/subscribe-presence", async (req, res, next) => {
-  try {
-    const userId = res.locals.session?.user?.id ?? "default";
-    const { jid } = req.body as { jid: string };
-    if (jid) {
-      const { whatsappService } = await import("../services/whatsapp.service");
-      void whatsappService.subscribePresence(jid, userId).catch(() => {});
-    }
-    res.json({ ok: true });
-  } catch (err) { next(err); }
+router.post("/subscribe-presence", async (_req, res) => {
+  res.json({ ok: true });
 });
 
 // All messages for a contact across all platforms — used by contact detail view
