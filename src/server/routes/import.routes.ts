@@ -2,10 +2,6 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { contactService } from "../services/contact.service";
 import { importService } from "../services/import.service";
-import { telegramPersonalService } from "../services/telegram-personal.service";
-import { discordService } from "../services/discord.service";
-import { slackService } from "../services/slack.service";
-import { whatsappService } from "../services/whatsapp.service";
 import { queues } from "../lib/queues";
 import type { CsvImportJobData } from "../workers/csv-import.worker";
 
@@ -92,72 +88,6 @@ router.post("/beeper", async (req, res, next) => {
   }
 });
 
-// POST /api/imports/telegram — import contacts from Telegram MTProto dialogs
-router.post("/telegram", async (req, res, next) => {
-  try {
-    const userId = res.locals.session?.user?.id ?? "default";
-    const rec = await (prisma as any).telegramPersonalSession.findUnique({ where: { userId } });
-    if (!rec?.sessionStr) {
-      res.status(400).json({ error: "Telegram personal not connected. Connect it in Settings first." });
-      return;
-    }
-
-    const job = await prisma.importJob.create({
-      data: { userId, source: "telegram_api", status: "running", startedAt: new Date() },
-    });
-
-    await queues.telegramImport.add("telegram-import", { userId, importJobId: job.id });
-    res.json({ status: "started", jobId: job.id });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/imports/discord — import contacts from Discord servers
-router.post("/discord", async (req, res, next) => {
-  try {
-    const userId = res.locals.session?.user?.id ?? "default";
-
-    // Check connection status
-    const status = await discordService.getStatus(userId);
-    if (!status.connected) {
-      res.status(400).json({ error: "Discord not connected. Connect it in Settings first." });
-      return;
-    }
-
-    const job = await prisma.importJob.create({
-      data: { userId, source: "discord_api", status: "running", startedAt: new Date() },
-    });
-
-    await queues.discordImport.add("discord-import", { userId, importJobId: job.id });
-    res.json({ status: "started", jobId: job.id });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/imports/whatsapp — import contacts from WhatsApp
-router.post("/whatsapp", async (req, res, next) => {
-  try {
-    const userId = res.locals.session?.user?.id ?? "default";
-
-    const status = await whatsappService.getStatus(userId);
-    if (!status.connected) {
-      res.status(400).json({ error: "WhatsApp not connected. Connect it in Settings first." });
-      return;
-    }
-
-    const job = await prisma.importJob.create({
-      data: { userId, source: "whatsapp_export", status: "running", startedAt: new Date() },
-    });
-
-    await queues.whatsappImport.add("whatsapp-import", { userId, importJobId: job.id });
-    res.json({ status: "started", jobId: job.id });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // POST /api/imports/csv — parse CSV and enqueue for processing
 router.post("/csv", async (req, res, next) => {
   try {
@@ -213,28 +143,6 @@ router.post("/csv", async (req, res, next) => {
     // Enqueue — worker handles all DB work, HTTP responds immediately
     await queues.csvImport.add("csv-import", { jobId: job.id, userId, rows, totalFound: rows.length } satisfies CsvImportJobData);
 
-    res.json({ status: "started", jobId: job.id });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// POST /api/imports/slack — import contacts from Slack workspace
-router.post("/slack", async (req, res, next) => {
-  try {
-    const userId = res.locals.session?.user?.id ?? "default";
-
-    const status = await slackService.getStatus(userId);
-    if (!status.connected) {
-      res.status(400).json({ error: "Slack not connected. Connect it in Settings first." });
-      return;
-    }
-
-    const job = await prisma.importJob.create({
-      data: { userId, source: "slack_api", status: "running", startedAt: new Date() },
-    });
-
-    await queues.slackImport.add("slack-import", { userId, importJobId: job.id });
     res.json({ status: "started", jobId: job.id });
   } catch (err) {
     next(err);
