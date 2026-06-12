@@ -11,9 +11,7 @@ export const QUEUE_NAMES = {
   DAILY_BRIEF: "daily-brief",
   OUTCOME_PROMPT: "outcome-prompt",
   GMAIL_SYNC: "gmail-sync",
-  X_DM_SYNC: "x-dm-sync",
   CSV_IMPORT: "csv-import",
-  LINKEDIN_SYNC: "linkedin-sync",
   BEEPER_SYNC: "beeper-sync",
 } as const;
 
@@ -29,9 +27,7 @@ export const queues = {
   dailyBrief: new Queue(QUEUE_NAMES.DAILY_BRIEF, redisConnection),
   outcomePrompt: new Queue(QUEUE_NAMES.OUTCOME_PROMPT, redisConnection),
   gmailSync: new Queue(QUEUE_NAMES.GMAIL_SYNC, redisConnection),
-  xDmSync: new Queue(QUEUE_NAMES.X_DM_SYNC, redisConnection),
   csvImport: new Queue(QUEUE_NAMES.CSV_IMPORT, redisConnection),
-  linkedinSync: new Queue(QUEUE_NAMES.LINKEDIN_SYNC, redisConnection),
   beeperSync: new Queue(QUEUE_NAMES.BEEPER_SYNC, redisConnection),
 };
 

@@ -537,29 +537,6 @@ app.listen(PORT, async () => {
   );
   console.log("[server] Gmail sync scheduled every 10 minutes");
 
-  // ── BullMQ: X DM sync every 2 minutes ──────────────────────
-  await queues.xDmSync
-    .removeRepeatable("x-dm-sync", { cron: "0 */12 * * *" })
-    .catch(() => {});
-  await queues.xDmSync.add(
-    "x-dm-sync",
-    {},
-    { repeat: { cron: "*/2 * * * *" }, ...DEFAULT_JOB_OPTIONS },
-  );
-  console.log("[server] X DM sync scheduled every 2 minutes");
-
-
-  // ── BullMQ: LinkedIn sync every 12 hours (not active yet) ──
-  await queues.linkedinSync
-    .removeRepeatable("linkedin-sync", { cron: "0 */12 * * *" })
-    .catch(() => {});
-  await queues.linkedinSync.add(
-    "linkedin-sync",
-    {},
-    { repeat: { cron: "0 */12 * * *" }, ...DEFAULT_JOB_OPTIONS },
-  );
-  console.log("[server] LinkedIn sync scheduled every 12 hours");
-
   // ── Contact dedup: split wrongly merged + merge Beeper/native duplicates ──
   void (async () => {
     try {

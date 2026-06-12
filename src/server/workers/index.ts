@@ -8,9 +8,7 @@ import { startSequenceTickWorker } from "./sequence-tick.worker";
 import { startDailyBriefWorker } from "./daily-brief.worker";
 import { startOutcomePromptWorker } from "./outcome-prompt.worker";
 import { startGmailSyncWorker } from "./gmail-sync.worker";
-import { startXDmSyncWorker } from "./x-dm-sync.worker";
 import { startCsvImportWorker } from "./csv-import.worker";
-import { startLinkedInSyncWorker } from "./linkedin-sync.worker";
 import { startBeeperSyncWorker } from "./beeper-sync.worker";
 
 let workers: Worker[] = [];
@@ -28,9 +26,7 @@ export function startAllWorkers() {
     startDailyBriefWorker(),
     startOutcomePromptWorker(),
     startGmailSyncWorker(),
-    startXDmSyncWorker(),
     startCsvImportWorker(),
-    startLinkedInSyncWorker(),
     startBeeperSyncWorker(),
   ];
 
