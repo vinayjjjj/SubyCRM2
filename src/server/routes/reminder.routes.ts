@@ -21,14 +21,16 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// GET /api/reminders/due — overdue reminders (dueDate <= now, status = pending)
+// GET /api/reminders/due — truly overdue reminders (dueDate before today, not just before now)
 router.get("/due", async (req, res, next) => {
   try {
     const userId = res.locals.session?.user?.id ?? "default";
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
     const reminders = await prisma.reminder.findMany({
       where: {
         status: "pending",
-        dueDate: { lte: new Date() },
+        dueDate: { lt: startOfToday },
         contact: { userId },
       },
       orderBy: { dueDate: "asc" },

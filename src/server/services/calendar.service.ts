@@ -1,4 +1,5 @@
-import { google } from "googleapis";
+import { calendar as calendarApi } from "@googleapis/calendar";
+import { OAuth2Client } from "google-auth-library";
 import { createHmac } from "crypto";
 import { prisma } from "../lib/prisma";
 import { encrypt, decrypt } from "../lib/encryption";
@@ -7,7 +8,7 @@ const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 const REDIRECT_URI = `${process.env.AUTH_BASE_URL || "http://localhost:4002"}/api/calendar/callback`;
 
 function oauthClient() {
-  return new google.auth.OAuth2(
+  return new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     REDIRECT_URI,
@@ -99,6 +100,13 @@ async function authedClient(userId: string) {
   return client;
 }
 
+function parseTzOffset(dateTimeStr: string): number {
+  if (!dateTimeStr || dateTimeStr.endsWith("Z") || dateTimeStr.endsWith("z")) return 0;
+  const m = dateTimeStr.match(/([+-])(\d{2}):(\d{2})$/);
+  if (!m) return 0;
+  return (m[1] === "+" ? 1 : -1) * (parseInt(m[2]) * 60 + parseInt(m[3]));
+}
+
 function detectChannel(event: {
   conferenceData?: { conferenceSolution?: { name?: string }; entryPoints?: { entryPointType: string; uri: string }[] };
   description?: string | null;
@@ -129,10 +137,10 @@ function getMeetLink(event: {
 export async function syncEvents(userId: string): Promise<number> {
   console.log("[syncEvents] starting for user", userId);
   const client = await authedClient(userId);
-  const cal = google.calendar({ version: "v3", auth: client });
+  const cal = calendarApi({ version: "v3", auth: client });
 
   const now = new Date();
-  const timeMin = new Date(now.getTime() - 14 * 86400_000).toISOString();
+  const timeMin = new Date(now.getTime() - 30 * 86400_000).toISOString();
   const timeMax = new Date(now.getTime() + 60 * 86400_000).toISOString();
 
   console.log("[syncEvents] fetching events from Google...");
@@ -171,9 +179,9 @@ export async function syncEvents(userId: string): Promise<number> {
 
   // Build rows to insert (skip cancelled / events with no dates)
   const rows: {
-    googleId: string; title: string; start: Date; end: Date;
+    userId: string; googleId: string; title: string; start: Date; end: Date;
     contactId: string | null; contactName: string | null;
-    channel: string; location: string | null;
+    channel: string; tzOffset: number; location: string | null;
     description: string | null; htmlLink: string | null;
   }[] = [];
 
@@ -192,8 +200,20 @@ export async function syncEvents(userId: string): Promise<number> {
       if (a.displayName && nameMap.has(a.displayName.toLowerCase())) { matched = nameMap.get(a.displayName.toLowerCase())!; break; }
     }
 
+    // Fallback: match by event title if no attendee match found
+    if (!matched && ev.summary) {
+      const titleLower = ev.summary.toLowerCase();
+      for (const [nameLower, contact] of nameMap) {
+        if (nameLower.length >= 4 && titleLower.includes(nameLower)) {
+          matched = contact;
+          break;
+        }
+      }
+    }
+
     const firstExternal = attendees.find((a) => !a.self);
     rows.push({
+      userId,
       googleId: ev.id,
       title: ev.summary ?? "Untitled",
       start: new Date(startStr),
@@ -201,6 +221,7 @@ export async function syncEvents(userId: string): Promise<number> {
       contactId: matched?.id ?? null,
       contactName: matched?.name ?? firstExternal?.displayName ?? firstExternal?.email ?? null,
       channel: detectChannel(ev),
+      tzOffset: parseTzOffset(startStr),
       location: getMeetLink(ev) ?? ev.location ?? null,
       description: ev.description ?? null,
       htmlLink: ev.htmlLink ?? null,
@@ -214,14 +235,15 @@ export async function syncEvents(userId: string): Promise<number> {
   // Remove any DB event in this time window that Google no longer returns (deleted on device)
   await (prisma as any).calendarEvent.deleteMany({
     where: {
+      userId,
       start: { gte: new Date(timeMin), lte: new Date(timeMax) },
       googleId: { notIn: googleIds },
     },
   });
 
   // Delete then re-insert the current batch (avoids pgbouncer upsert hangs)
-  await (prisma as any).calendarEvent.deleteMany({ where: { googleId: { in: googleIds } } });
-  await (prisma as any).calendarEvent.createMany({ data: rows });
+  await (prisma as any).calendarEvent.deleteMany({ where: { userId, googleId: { in: googleIds } } });
+  await (prisma as any).calendarEvent.createMany({ data: rows, skipDuplicates: true });
 
   console.log(`[syncEvents] saved ${rows.length} events`);
   await prisma.googleCalendarToken.update({
@@ -232,9 +254,10 @@ export async function syncEvents(userId: string): Promise<number> {
   return rows.length;
 }
 
-export async function getEvents(start?: Date, end?: Date) {
+export async function getEvents(userId: string, start?: Date, end?: Date) {
   return prisma.calendarEvent.findMany({
     where: {
+      userId,
       start: {
         ...(start ? { gte: start } : {}),
         ...(end ? { lte: end } : {}),

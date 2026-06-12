@@ -668,7 +668,13 @@ export function InboxView() {
         const list = prev[selected.key] ?? [];
         return { ...prev, [selected.key]: list.map((m) => m.id === tempId ? { ...m, status: "failed" } : m) };
       });
-      setSendError(e instanceof Error ? e.message : "Failed to send");
+      const raw = e instanceof Error ? e.message : "";
+      const friendly = raw.includes("re-authorization") || raw.includes("reconnect") || raw.includes("session")
+        ? raw
+        : raw.startsWith("API error") || raw.length > 120
+          ? "Message failed to deliver — please try again"
+          : raw || "Message failed to deliver — please try again";
+      setSendError(friendly);
     });
   };
 

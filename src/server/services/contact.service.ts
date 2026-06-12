@@ -161,6 +161,7 @@ export const contactService = {
       notes: { orderBy: { createdAt: "desc" } as const, take: 20 },
       contactTags: { include: { tag: true } },
       interactions: { orderBy: { occurredAt: "desc" } as const, take: 50 },
+      reminders: { where: { status: "pending" } as const, orderBy: { dueDate: "asc" } as const, take: 5 },
     };
     return prisma.contact.findFirst({ where: { id, userId }, include });
   },

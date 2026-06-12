@@ -1,4 +1,5 @@
-import { google } from "googleapis";
+import { gmail as gmailApi } from "@googleapis/gmail";
+import { OAuth2Client } from "google-auth-library";
 import { createHmac } from "crypto";
 import { prisma } from "../lib/prisma";
 import { inboxService } from "./inbox.service";
@@ -12,7 +13,7 @@ const REDIRECT_URI = `${process.env.AUTH_BASE_URL || "http://localhost:4002"}/ap
 const STATE_SECRET = process.env.BETTER_AUTH_SECRET || "suby-gmail-state-secret";
 
 function oauthClient() {
-  return new google.auth.OAuth2(
+  return new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     REDIRECT_URI,
@@ -138,7 +139,7 @@ function cleanEmailText(raw: string): string {
 export async function syncThreads(userId: string): Promise<number> {
   console.log("[syncThreads] starting for user", userId);
   const client = await authedClient(userId);
-  const gmail = google.gmail({ version: "v1", auth: client });
+  const gmail = gmailApi({ version: "v1", auth: client });
 
   // Build contact email map (scoped to this user)
   const contacts = await prisma.contact.findMany({
@@ -354,7 +355,7 @@ export async function sendEmailViaGmailApi(
     throw new Error("Gmail not connected — go to Settings → Gmail to reconnect.");
   }
 
-  const gmail = google.gmail({ version: "v1", auth: client });
+  const gmail = gmailApi({ version: "v1", auth: client });
 
   const emailLines = [
     `To: ${params.to}`,

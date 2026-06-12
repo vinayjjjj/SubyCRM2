@@ -48,6 +48,7 @@ export function startDailyBriefWorker() {
         }),
         prisma.calendarEvent.findMany({
           where: {
+            userId,
             start: { gte: todayStart, lte: todayEnd },
           },
           orderBy: { start: "asc" },

@@ -253,13 +253,15 @@ export const aiApi = {
     );
     if (res.status === "queued" && res.jobId) {
       const raw = await pollJob<any>("ai-prep", res.jobId);
-      // Worker returns the raw generatePrep object: { summary, talkingPoints[], recentActivity, suggestedActions[] }
-      // Format it into a readable string for the frontend
+      // Worker returns: { recentActivity, talkingPoints[], suggestedActions[] }
       const lines: string[] = [];
-      if (raw?.summary) lines.push(raw.summary);
-      if (raw?.recentActivity) lines.push(`\nRecent activity: ${raw.recentActivity}`);
-      if (raw?.talkingPoints?.length) lines.push(`\nTalking points:\n${(raw.talkingPoints as string[]).map((p) => `• ${p}`).join("\n")}`);
-      if (raw?.suggestedActions?.length) lines.push(`\nSuggested actions:\n${(raw.suggestedActions as string[]).map((a) => `• ${a}`).join("\n")}`);
+      if (raw?.recentActivity) lines.push(raw.recentActivity);
+      if (raw?.talkingPoints?.length) {
+        for (const tp of (raw.talkingPoints as string[]).slice(0, 3)) lines.push(`• ${tp}`);
+      }
+      if (raw?.suggestedActions?.length) {
+        lines.push(`→ ${(raw.suggestedActions as string[])[0]}`);
+      }
       return { briefing: lines.join("\n") || "No briefing generated." };
     }
     return res as { briefing: string };

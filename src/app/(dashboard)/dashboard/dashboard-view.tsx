@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { remindersApi, calendarApi, aiApi, meApi, contactsApi, type AlertApi, type CalendarEventApi } from "@/lib/api";
+import type { RelationshipStrength } from "@/lib/types";
 import { PlatformIcon } from "@/components/platform-icon";
 import type { Reminder, PlatformType } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -84,8 +85,8 @@ export function DashboardView() {
 
     // Calendar events
     const now = new Date();
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+    const todayStart = new Date(now); todayStart.setUTCHours(0, 0, 0, 0);
+    const todayEnd = new Date(now); todayEnd.setUTCHours(23, 59, 59, 999);
     const weekAgo = new Date(now.getTime() - 7 * 86400_000);
     const weekEnd = new Date(now.getTime() + 7 * 86400_000);
 
@@ -128,6 +129,24 @@ export function DashboardView() {
   const markReminderDone = (id: string) => {
     setOverdueReminders((prev) => prev.filter((r) => r.id !== id));
     remindersApi.update(id, { status: "done" }).catch(() => {});
+  };
+
+  const OUTCOME_TO_STRENGTH: Record<string, RelationshipStrength | null> = {
+    strong: "hot",
+    ok: "warm",
+    cold: "cold",
+    noshow: null,
+    dismissed: null,
+  };
+
+  const logOutcome = (event: CalendarEventApi, outcome: string) => {
+    setOutcomes((prev) => ({ ...prev, [event.id]: outcome }));
+    const strength = OUTCOME_TO_STRENGTH[outcome];
+    if (!event.contactId || !strength) return;
+    contactsApi.update(event.contactId, {
+      relationshipStrength: strength,
+      lastContactDate: event.start,
+    }).catch(() => {});
   };
 
   const visibleAlerts = alerts.filter((a) => !dismissed.has(a.contactId));
@@ -177,7 +196,7 @@ export function DashboardView() {
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             {pastEvents.filter((e) => !outcomes[e.id]).slice(0, 4).map((e, idx, arr) => (
               <OutcomeRow key={e.id} event={e} isLast={idx === arr.length - 1}
-                onPick={(outcome) => setOutcomes((prev) => ({ ...prev, [e.id]: outcome }))} />
+                onPick={(outcome) => logOutcome(e, outcome)} />
             ))}
           </div>
         </section>

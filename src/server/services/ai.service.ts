@@ -179,7 +179,7 @@ Rules:
   },
 
   async generatePrep(contact: ContactForAI): Promise<{
-    summary: string; talkingPoints: string[]; recentActivity: string; suggestedActions: string[];
+    recentActivity: string; talkingPoints: string[]; suggestedActions: string[];
   }> {
     const platforms = contact.platforms.map((p) => `${p.type}${p.displayName ? ` (${p.displayName})` : ""}`).join(", ");
     const interactions = contact.interactions.slice(0, 20)
@@ -188,28 +188,25 @@ Rules:
     const notes = (contact.notes || []).slice(0, 10).map((n) => `- ${n.content.slice(0, 300)}`).join("\n");
     const tags = (contact.contactTags || []).map((ct) => ct.tag.name).join(", ");
 
-    const systemPrompt = `You are a high-value meeting prep assistant for a founder of a payments infrastructure startup called "Suby".
-Suby is a payments infra company targeting payment processors (like Stripe, Adyen), crypto custodians (Coinbase, Ledger), VCs (Sequoia, a16z), AI/infra players (Mistral, Vercel, HF), and fintechs (Qonto, Ramp).
+    const systemPrompt = `You are a concise meeting prep assistant for a founder at Suby, a payments infrastructure startup.
 
-Your task is to analyze a contact's details and generate a highly specific, customized meeting prep briefing. Do not use generic placeholders. Use the actual name, company, role, tags, notes, and the log of recent interactions.
+CRITICAL RULES — follow exactly:
+1. ONLY use facts that appear explicitly in the provided interactions and notes. Do not invent, infer, or embellish.
+2. If interactions are empty or None, say "No prior interactions recorded." for recentActivity and write talkingPoints based only on their role/company/tags.
+3. If a topic is not clearly stated in an interaction snippet, do NOT mention it.
+4. Keep every field SHORT: recentActivity ≤ 15 words, each talkingPoints bullet ≤ 12 words.
 
-Analyze the interactions carefully:
-- If there are recent interactions (e.g. WhatsApp chats, emails, DMs), summarize them accurately in 'recentActivity' (e.g., "Recently exchanged 27 messages on WhatsApp, discussing...").
-- If there are no interactions or only one-sided outbound messages, clearly state the status in 'recentActivity' (e.g., "No prior mutual exchanges; sent outbound messages on WhatsApp recently trying to connect.").
-- Tailor the 'talkingPoints' and 'suggestedActions' to their specific sector and company (e.g. if they are a payment processor, discuss settlement flows/stablecoin rails; if crypto, discuss custody/USDC/EU regulation; if VC, discuss metrics/runway; if partner, discuss integration/roadmap).
-
-Return a JSON object with this exact structure:
+Return JSON:
 {
-  "summary": "1-2 sentences summarizing who they are, their role/company, and why they are relevant to Suby.",
-  "recentActivity": "1-2 sentences summarizing the last time you interacted with them, the platform, the direction of the messages, and the frequency/status.",
+  "recentActivity": "Short factual sentence about last real interaction (platform + what happened) OR 'No prior interactions recorded.'",
   "talkingPoints": [
-    "A specific talking point reference to your last exchange, notes, or platform.",
-    "A concrete topic to discuss tailored to their sector/company (e.g. settlement flows, hardware specs, stablecoin rails, runway projections).",
-    "A question or priority to ask them about regarding the upcoming quarter."
+    "One bullet directly referencing a specific snippet or note (or role/company if no interactions).",
+    "One concrete topic relevant to their sector/company.",
+    "One direct question to ask them."
   ],
   "suggestedActions": [
-    "Action item 1 (e.g., send follow-up, propose a next step, share spec).",
-    "Action item 2 (e.g., update relationship status, schedule reminder)."
+    "One specific next action under 10 words.",
+    "One specific next action under 10 words."
   ]
 }`;
 

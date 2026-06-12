@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import { RemindersSkeleton } from "@/components/ui/skeleton";
 import { remindersApi, contactsApi } from "@/lib/api";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -356,13 +357,20 @@ function ContactModal({ contact }: { contact: Contact }) {
               {[contact.role, contact.company].filter(Boolean).join(" @ ")}
             </div>
           )}
-          <div className="flex gap-1.5 mt-2 flex-wrap">
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
             <Badge variant="purple">{contact.type}</Badge>
             <Badge variant="blue">{contact.domain}</Badge>
             <Badge variant={contact.relationshipStrength === "hot" ? "red" : contact.relationshipStrength === "warm" ? "orange" : "blue"}>
               {contact.relationshipStrength}
             </Badge>
           </div>
+          <Link
+            href={`/dashboard/contacts/${contact.id}`}
+            className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-lg border border-border bg-secondary text-xs font-semibold text-foreground hover:bg-accent transition-colors self-start"
+            style={{ textDecoration: "none" }}
+          >
+            View contact →
+          </Link>
         </div>
       </div>
 
@@ -392,6 +400,26 @@ function ContactModal({ contact }: { contact: Contact }) {
           </div>
         )}
 
+        {/* Notes — shown before recent exchanges */}
+        {notes.length > 0 && (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground mb-2">Notes</div>
+            <div className="flex flex-col gap-2">
+              {notes.slice(0, 2).map((n) => (
+                <div
+                  key={n.id}
+                  className="p-2.5 px-3 bg-status-yellow-bg border border-status-yellow/20 rounded-lg"
+                >
+                  <div className="text-xs text-foreground leading-relaxed">{n.content}</div>
+                  <div className="text-[10px] text-muted-foreground mt-1.5">
+                    {new Date(n.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: new Date(n.createdAt).getFullYear() !== new Date().getFullYear() ? "numeric" : undefined })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Recent exchanges */}
         {recent.length > 0 && (
           <div>
@@ -412,23 +440,6 @@ function ContactModal({ contact }: { contact: Contact }) {
                       {new Date(i.occurredAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Notes */}
-        {notes.length > 0 && (
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground mb-2">Notes</div>
-            <div className="flex flex-col gap-2">
-              {notes.map((n) => (
-                <div
-                  key={n.id}
-                  className="p-2.5 px-3 bg-status-yellow-bg border border-status-yellow/20 rounded-lg text-xs text-foreground leading-relaxed"
-                >
-                  {n.content}
                 </div>
               ))}
             </div>

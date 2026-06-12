@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
   schemas  = ["contacts"]
 }
 
@@ -363,20 +362,23 @@ model GoogleCalendarToken {
 
 model CalendarEvent {
   id          String   @id @default(uuid())
-  googleId    String   @unique @map("google_id")
+  userId      String   @map("user_id")
+  googleId    String   @map("google_id")
   title       String
   start       DateTime
   end         DateTime
   contactId   String?  @map("contact_id")
   contactName String?  @map("contact_name")
   channel     String   @default("meet")
+  tzOffset    Int      @default(0) @map("tz_offset")
   location    String?
   description String?
   htmlLink    String?  @map("html_link")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  @@index([start])
+  @@unique([userId, googleId])
+  @@index([userId, start])
   @@map("calendar_events")
   @@schema("contacts")
 }

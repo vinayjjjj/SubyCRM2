@@ -6,7 +6,7 @@ import type { Contact } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { calendarApi, aiApi, contactsApi } from "@/lib/api";
+import { calendarApi, aiApi, contactsApi, remindersApi } from "@/lib/api";
 
 const HOUR_HEIGHT = 48; // px per hour
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -66,13 +66,45 @@ function fmtRange(start: Date, end: Date): string {
   return `${s} – ${e}`;
 }
 
-function fmtTime(d: Date): string {
-  return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+// Apply a UTC-offset in minutes to a UTC Date so .getUTC* methods return the "local" clock time
+function applyTz(d: Date, tzMinutes: number): Date {
+  return new Date(d.getTime() + tzMinutes * 60000);
+}
+
+function fmtTime(d: Date, tzOffset = 0): string {
+  const local = applyTz(d, tzOffset);
+  return `${local.getUTCHours().toString().padStart(2, "0")}:${local.getUTCMinutes().toString().padStart(2, "0")}`;
 }
 
 function initials(name: string): string {
   return name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("");
 }
+
+function relDays(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+function fmtDueDate(dateStr: string): string {
+  const days = Math.floor((new Date(dateStr).getTime() - Date.now()) / 86400000);
+  if (days < -1) return `${-days}d overdue`;
+  if (days === -1) return "Due yesterday";
+  if (days === 0) return "Due today";
+  if (days === 1) return "Due tomorrow";
+  return `Due in ${days}d`;
+}
+
+const STRENGTH_META: Record<string, { label: string; color: string; bg: string }> = {
+  hot:  { label: "Hot",  color: "#ef4444", bg: "rgba(239,68,68,0.12)" },
+  warm: { label: "Warm", color: "#f97316", bg: "rgba(249,115,22,0.12)" },
+  cold: { label: "Cold", color: "#6b7280", bg: "rgba(107,114,128,0.12)" },
+};
 
 function eventTone(e: CalendarEvent): { bg: string; border: string; color: string } {
   // Hash on the event ID so every event gets its own distinct color
@@ -86,6 +118,30 @@ export function PrepView() {
   const [calStatus, setCalStatus] = useState<{ connected: boolean; lastSync: string | null } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [calError, setCalError] = useState<string | null>(null);
+  const [syncInfo, setSyncInfo] = useState<string | null>(null);
+
+  const runSync = async (silent = false) => {
+    if (syncing) return;
+    setSyncing(true);
+    if (!silent) setSyncInfo(null);
+    try {
+      const result = await calendarApi.sync() as { synced: number };
+      const data = await calendarApi.getEvents();
+      setEvents(data as unknown as CalendarEvent[]);
+      const status = await calendarApi.status();
+      setCalStatus(status);
+      window.dispatchEvent(new Event("calendar-synced"));
+      if (!silent) setSyncInfo(`Synced ${result.synced ?? "?"} events`);
+    } catch (err: any) {
+      const raw = err?.message ?? "";
+      const msg = raw.length > 80 || raw.includes("/Users/") || raw.includes("prisma")
+        ? "Sync failed — try disconnecting and reconnecting Google Calendar."
+        : `Sync failed: ${raw}`;
+      setCalError(msg);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Check connection status and load real events on mount
   useEffect(() => {
@@ -93,10 +149,12 @@ export function PrepView() {
       .then((status) => {
         setCalStatus(status);
         if (status.connected) {
-          return calendarApi.getEvents().then((data) => {
-            // Replace mock data with real data (even if empty — real empty is better than fake data)
-            setEvents(data as unknown as CalendarEvent[]);
-          });
+          // Load cached events immediately so the calendar isn't blank
+          calendarApi.getEvents()
+            .then((data) => setEvents(data as unknown as CalendarEvent[]))
+            .catch(() => {});
+          // Background sync to pick up additions AND deletions
+          runSync(true);
         }
       })
       .catch((err) => { console.warn("[prep] calendar status failed:", err); });
@@ -147,16 +205,7 @@ export function PrepView() {
   }
 
   async function handleSync() {
-    setSyncing(true);
-    try {
-      await calendarApi.sync();
-      const data = await calendarApi.getEvents();
-      setEvents(data as unknown as CalendarEvent[]);
-      const status = await calendarApi.status();
-      setCalStatus(status);
-    } catch { /* ignore */ } finally {
-      setSyncing(false);
-    }
+    await runSync(false);
   }
 
   const hourStart = 0;
@@ -170,8 +219,15 @@ export function PrepView() {
     for (let i = 0; i < 7; i++) map[i] = [];
     for (const e of events) {
       const start = new Date(e.start);
+      const tz = e.tzOffset ?? 0;
+      const localStart = applyTz(start, tz);
       for (let i = 0; i < 7; i++) {
-        if (start.toDateString() === days[i].toDateString()) {
+        const col = days[i];
+        if (
+          localStart.getUTCFullYear() === col.getFullYear() &&
+          localStart.getUTCMonth() === col.getMonth() &&
+          localStart.getUTCDate() === col.getDate()
+        ) {
           map[i].push(e);
           break;
         }
@@ -211,9 +267,14 @@ export function PrepView() {
             {fmtRange(weekStart, weekEnd)}
           </span>
           {calStatus?.connected ? (
-            <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing}>
-              {syncing ? "Syncing…" : "↻ Sync"}
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={handleSync} disabled={syncing}>
+                {syncing ? "Syncing…" : "↻ Sync"}
+              </Button>
+              {syncInfo && (
+                <span style={{ fontSize: 12, color: "var(--gc)", fontWeight: 500 }}>{syncInfo}</span>
+              )}
+            </>
           ) : calStatus !== null ? (
             <Button size="sm" variant="outline" onClick={handleConnect} style={{ borderColor: "#4285F4", color: "#4285F4" }}>
               Connect Google Calendar
@@ -265,7 +326,9 @@ export function PrepView() {
                 {eventsByDay[dayIdx].map((e) => {
                   const start = new Date(e.start);
                   const end = new Date(e.end);
-                  const hourFromStart = start.getHours() + start.getMinutes() / 60 - hourStart;
+                  const tz = e.tzOffset ?? 0;
+                  const localStart = applyTz(start, tz);
+                  const hourFromStart = localStart.getUTCHours() + localStart.getUTCMinutes() / 60 - hourStart;
                   const durHours = (end.getTime() - start.getTime()) / 3600000;
                   const top = Math.max(0, hourFromStart) * HOUR_HEIGHT;
                   const gridHeight = (hourEnd - hourStart) * HOUR_HEIGHT;
@@ -290,7 +353,7 @@ export function PrepView() {
                         {e.title}
                       </div>
                       <div style={{ fontSize: 10, color: tone.color, opacity: 0.7, marginTop: 1 }}>
-                        {fmtTime(start)}{showContact ? ` · ${e.contactName}` : ""}
+                        {fmtTime(start, tz)}{showContact ? ` · ${e.contactName}` : ""}
                       </div>
                     </button>
                   );
@@ -383,6 +446,8 @@ export function PrepView() {
 function EventModalContent({ event }: { event: CalendarEvent }) {
   const start = new Date(event.start);
   const end = new Date(event.end);
+  const tz = event.tzOffset ?? 0;
+  const localStart = applyTz(start, tz);
   const channelMeta = event.channel ? CHANNEL_META[event.channel as CallChannel] ?? null : null;
   const fallbackTone = hashColor(event.id ?? event.title ?? "");
   const isLink = event.location && /^https?:\/\//.test(event.location);
@@ -390,6 +455,14 @@ function EventModalContent({ event }: { event: CalendarEvent }) {
   const [contact, setContact] = useState<Contact | null>(null);
   const [briefing, setBriefing] = useState<string | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
+
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
+
+  const [reminderText, setReminderText] = useState("");
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [savedDays, setSavedDays] = useState<number | null>(null);
 
   useEffect(() => {
     if (!event.contactId) return;
@@ -400,6 +473,34 @@ function EventModalContent({ event }: { event: CalendarEvent }) {
       .catch(() => setBriefing("Could not generate briefing."))
       .finally(() => setBriefingLoading(false));
   }, [event.contactId]);
+
+  const handleLogNote = async () => {
+    if (!noteText.trim() || !event.contactId) return;
+    setSavingNote(true);
+    try {
+      await contactsApi.addNote(event.contactId, noteText.trim());
+      setNoteText("");
+      setNoteSaved(true);
+      setTimeout(() => setNoteSaved(false), 3000);
+    } catch {}
+    finally { setSavingNote(false); }
+  };
+
+  const handleSetReminder = async (days: number) => {
+    if (!event.contactId) return;
+    const content = reminderText.trim() || `Follow up after: ${event.title}`;
+    const due = new Date();
+    due.setDate(due.getDate() + days);
+    due.setHours(9, 0, 0, 0);
+    setSavingReminder(true);
+    try {
+      await remindersApi.create(event.contactId, { content, dueDate: due.toISOString() });
+      setReminderText("");
+      setSavedDays(days);
+      setTimeout(() => setSavedDays(null), 3000);
+    } catch {}
+    finally { setSavingReminder(false); }
+  };
 
   const sections = useMemo(() => (briefing ? parseBriefing(briefing) : []), [briefing]);
 
@@ -413,14 +514,24 @@ function EventModalContent({ event }: { event: CalendarEvent }) {
       <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--bd)", display: "flex", alignItems: "flex-start", gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: "var(--t3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.04 }}>
-            {start.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })} · {fmtTime(start)}–{fmtTime(end)}
+            {localStart.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })} · {fmtTime(start, tz)}–{fmtTime(end, tz)}
           </div>
           <div style={{ fontSize: 20, fontWeight: 700, color: "var(--t1)", letterSpacing: "-0.02em", marginTop: 2 }}>
             {event.contactName || event.title}
           </div>
-          {contact && [contact.role, contact.company].filter(Boolean).length > 0 && (
-            <div style={{ fontSize: 12, color: "var(--t2)", marginTop: 2 }}>
-              {[contact.role, contact.company].filter(Boolean).join(" @ ")}
+          {contact && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 2, flexWrap: "wrap" }}>
+              {[contact.role, contact.company].filter(Boolean).length > 0 && (
+                <span style={{ fontSize: 12, color: "var(--t2)" }}>
+                  {[contact.role, contact.company].filter(Boolean).join(" @ ")}
+                </span>
+              )}
+              <a
+                href={`/dashboard/contacts/${event.contactId}`}
+                style={{ fontSize: 11, color: "var(--bc)", fontWeight: 600, textDecoration: "none", background: "var(--bb)", padding: "2px 8px", borderRadius: 6 }}
+              >
+                View contact →
+              </a>
             </div>
           )}
         </div>
@@ -473,6 +584,58 @@ function EventModalContent({ event }: { event: CalendarEvent }) {
           </div>
         ) : null}
 
+        {/* Contact context panel */}
+        {contact && (
+          <div style={{ padding: "12px 14px", background: "var(--sf2)", border: "1px solid var(--bd)", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+            {/* Strength + last contact */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {(() => {
+                const s = STRENGTH_META[contact.relationshipStrength] ?? STRENGTH_META.cold;
+                return (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 8px", borderRadius: 5 }}>
+                    {s.label}
+                  </span>
+                );
+              })()}
+              <span style={{ fontSize: 12, color: "var(--t2)" }}>
+                Last contact: <strong style={{ color: "var(--t1)" }}>{relDays(contact.lastContactDate)}</strong>
+              </span>
+              {(contact.reminders?.length ?? 0) > 0 && (
+                <span style={{ fontSize: 11, color: "var(--oc)", background: "var(--ob)", padding: "2px 7px", borderRadius: 5, fontWeight: 600 }}>
+                  {contact.reminders!.length} open reminder{contact.reminders!.length > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+
+            {/* Open reminders */}
+            {(contact.reminders?.length ?? 0) > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {contact.reminders!.slice(0, 3).map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ fontSize: 11 }}>⏰</span>
+                    <span style={{ fontSize: 12, color: "var(--t1)", flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      {r.content}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--t3)", flexShrink: 0 }}>
+                      {fmtDueDate(r.dueDate)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Latest note */}
+            {contact.notes && contact.notes.length > 0 && (
+              <div style={{ fontSize: 12, color: "var(--t2)", borderTop: "1px solid var(--bd)", paddingTop: 6 }}>
+                <span style={{ color: "var(--t3)", fontSize: 11, marginRight: 4 }}>📝</span>
+                <span style={{ fontStyle: "italic" }}>
+                  {contact.notes[0].content.slice(0, 120)}{contact.notes[0].content.length > 120 ? "…" : ""}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Pre-qualification */}
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
@@ -482,7 +645,7 @@ function EventModalContent({ event }: { event: CalendarEvent }) {
 
           {!event.contactId ? (
             <div style={{ fontSize: 12, color: "var(--t2)", padding: "10px 14px", background: "var(--sf2)", border: "1px solid var(--bd)", borderRadius: 8 }}>
-              No contact matched for this event. Save this person as a contact to get AI briefings.
+              No contact matched — add this person as a contact to get AI briefings and log notes here.
             </div>
           ) : briefingLoading ? (
             <div style={{ fontSize: 12, color: "var(--t2)", padding: "10px 14px", background: "var(--sf2)", border: "1px solid var(--bd)", borderRadius: 8 }}>
@@ -517,6 +680,85 @@ function EventModalContent({ event }: { event: CalendarEvent }) {
             </div>
           )}
         </div>
+
+        {/* Log note + follow-up — only when contact is matched */}
+        {event.contactId && (
+          <>
+            {/* Log a note */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--t3)", marginBottom: 8 }}>
+                Log a note
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={noteText}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleLogNote(); } }}
+                  placeholder="What happened in this call…"
+                  style={{
+                    flex: 1, padding: "8px 10px", borderRadius: 8,
+                    border: "1px solid var(--bd)", background: "var(--sf2)",
+                    color: "var(--t1)", fontSize: 12, outline: "none",
+                  }}
+                />
+                <button
+                  onClick={handleLogNote}
+                  disabled={savingNote || !noteText.trim()}
+                  style={{
+                    padding: "0 14px", borderRadius: 8, border: "1px solid var(--bd)",
+                    background: noteSaved ? "var(--gc)" : "var(--sf2)",
+                    color: noteSaved ? "#fff" : "var(--t1)",
+                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    opacity: !noteText.trim() ? 0.4 : 1, transition: "all 0.15s",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {noteSaved ? "Saved ✓" : savingNote ? "…" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            {/* Set follow-up reminder */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--t3)", marginBottom: 8 }}>
+                Follow-up reminder
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  value={reminderText}
+                  onChange={(e) => setReminderText(e.target.value)}
+                  placeholder={`Follow up after: ${event.title}`}
+                  style={{
+                    flex: 1, minWidth: 160, padding: "8px 10px", borderRadius: 8,
+                    border: "1px solid var(--bd)", background: "var(--sf2)",
+                    color: "var(--t1)", fontSize: 12, outline: "none",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[{ label: "3d", days: 3 }, { label: "1w", days: 7 }, { label: "2w", days: 14 }].map(({ label, days }) => {
+                    const isSaved = savedDays === days;
+                    return (
+                      <button
+                        key={days}
+                        onClick={() => handleSetReminder(days)}
+                        disabled={savingReminder}
+                        style={{
+                          padding: "0 12px", height: 34, borderRadius: 8,
+                          border: "1px solid var(--oc)", background: isSaved ? "var(--gc)" : "var(--ob)",
+                          color: isSaved ? "#fff" : "var(--oc)",
+                          fontSize: 12, fontWeight: 600, cursor: "pointer",
+                          opacity: savingReminder ? 0.5 : 1, transition: "all 0.15s",
+                        }}
+                      >
+                        {isSaved ? "Set ✓" : label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </>
   );

@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type TimelineItem =
   | { kind: "interaction"; date: string; data: Interaction }
@@ -117,6 +118,13 @@ function relativeDate(dateStr: string | null): string {
   if (!dateStr) return "Never";
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86400000);
+  if (days < 0) {
+    const abs = -days;
+    if (abs === 1) return "Tomorrow";
+    if (abs < 7) return `In ${abs}d`;
+    if (abs < 30) return `In ${Math.floor(abs / 7)}w`;
+    return new Date(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return `${days}d ago`;
@@ -255,7 +263,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
     setContact((prev) => prev ? { ...prev, notes: (prev.notes || []).filter((n) => n.id !== noteId) } : prev);
     contactsApi.deleteNote(id, noteId).catch((err) => {
       reload();
-      alert(`Failed to delete note: ${err?.message ?? "Unknown error"}`);
+      toast.error(err?.message ?? "Failed to delete note");
     });
   };
 
@@ -272,7 +280,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
       await aiApi.summary(id, true); // polls until worker finishes, forces refresh
       await reload();           // then re-fetch contact — aiSummary field is now populated
     } catch (e: any) {
-      console.error("[summary]", e?.message);
+      toast.error(e?.message ?? "Failed to generate summary");
     } finally { setSummarizing(false); }
   };
 
@@ -329,7 +337,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
       })
       .catch((err) => {
         setContact((prev) => prev ? { ...prev, platforms: (prev.platforms || []).filter((p) => p.id !== optimisticPlatform.id) } : prev);
-        alert(`Failed to add platform: ${err?.message ?? "Unknown error"}`);
+        toast.error(err?.message ?? "Failed to add platform");
       });
   };
 
@@ -356,7 +364,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
     setEditPlatformValue("");
     contactsApi.updatePlatform(id, pid, { platformId: handle }).catch((err) => {
       reload();
-      alert(`Failed to update platform: ${err?.message ?? "Unknown error"}`);
+      toast.error(err?.message ?? "Failed to update platform");
     });
   };
 
@@ -364,7 +372,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
     setContact((prev) => prev ? { ...prev, platforms: (prev.platforms || []).filter((p) => p.id !== pid) } : prev);
     contactsApi.deletePlatform(id, pid).catch((err) => {
       reload();
-      alert(`Failed to remove platform: ${err?.message ?? "Unknown error"}`);
+      toast.error(err?.message ?? "Failed to remove platform");
     });
   };
 
@@ -372,7 +380,8 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
     if (!reminderContent.trim() || !reminderDate) return;
     setAddingReminder(true);
     try {
-      await remindersApi.create(id, { content: reminderContent.trim(), dueDate: reminderDate });
+      const dueDate = reminderDate.includes("T") ? reminderDate : `${reminderDate}T12:00:00`;
+      await remindersApi.create(id, { content: reminderContent.trim(), dueDate });
       setReminderContent("");
       setReminderDate("");
       loadReminders();
@@ -398,7 +407,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
 
   const handleFieldChange = async (field: string, value: string) => {
     try { await contactsApi.update(id, { [field]: value } as Partial<Contact>); await reload(); }
-    catch (err: any) { alert(`Failed to update contact: ${err?.message ?? "Unknown error"}`); }
+    catch (err: any) { toast.error(err?.message ?? "Failed to update contact"); }
   };
 
   const DEFAULT_TAGS = ["Investor", "Strategic", "EU", "US", "Crypto"];
@@ -423,7 +432,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
       })
       .catch((err) => {
         setContact((prev) => prev ? { ...prev, contactTags: (prev.contactTags || []).filter((ct) => ct.id !== optimisticCt.id) } : prev);
-        alert(`Failed to add tag: ${err?.message ?? "Unknown error"}`);
+        toast.error(err?.message ?? "Failed to add tag");
       });
   };
 
@@ -431,7 +440,7 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
     setContact((prev) => prev ? { ...prev, contactTags: (prev.contactTags || []).filter((ct) => ct.tagId !== tagId) } : prev);
     contactsApi.removeTag(id, tagId).catch((err) => {
       reload();
-      alert(`Failed to remove tag: ${err?.message ?? "Unknown error"}`);
+      toast.error(err?.message ?? "Failed to remove tag");
     });
   };
 
@@ -440,7 +449,11 @@ export function ContactDetailView({ paramsPromise }: { paramsPromise: Promise<{ 
   if (!contact) {
     return (
       <div className="py-12 px-6 text-center text-muted-foreground text-sm">
-        {loadError ? `Error: ${loadError}` : "Contact not found"}
+        {loadError ? (
+          <span style={{ color: "var(--rc)" }}>
+            Could not load contact — {loadError}
+          </span>
+        ) : "Contact not found"}
       </div>
     );
   }
@@ -838,7 +851,13 @@ export function UnifiedTimeline({
   onDeleteReminder: (id: string) => void;
 }) {
   const [tab, setTab] = useState<"add" | "note" | "reminder">("add");
-  const items = buildTimeline(contact, reminders);
+  const [tlFilter, setTlFilter] = useState<"all" | "notes" | "reminders">("all");
+  const allItems = buildTimeline(contact, reminders);
+  const items = tlFilter === "notes"
+    ? allItems.filter((i) => i.kind === "note")
+    : tlFilter === "reminders"
+      ? allItems.filter((i) => i.kind === "reminder")
+      : allItems;
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
@@ -876,9 +895,26 @@ export function UnifiedTimeline({
 
       {/* Timeline */}
       <div className="p-4">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground mb-3">
-          Timeline
-          <span className="font-normal text-muted-foreground ml-2">({items.length})</span>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+            Timeline
+            <span className="font-normal ml-2">({items.length})</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {(["all", "notes", "reminders"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setTlFilter(f)}
+                className="px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-colors capitalize"
+                style={tlFilter === f
+                  ? { background: "var(--ac)", color: "var(--ac-fg, var(--foreground))", border: "1px solid var(--ac)" }
+                  : { background: "transparent", color: "var(--t3)", border: "1px solid var(--bd)" }
+                }
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
         {items.length === 0 ? (
           <div className="py-12 px-6 text-center text-muted-foreground text-sm">No activity yet.</div>

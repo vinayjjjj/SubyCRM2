@@ -8,6 +8,7 @@ export interface CalendarEvent {
   contactId: string;
   contactName: string;
   channel: CallChannel;
+  tzOffset?: number;
   location?: string;
   description?: string;
 }

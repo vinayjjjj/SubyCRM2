@@ -76,9 +76,10 @@ calendarRouter.post("/sync", async (_req, res, next) => {
 // GET /api/calendar/events
 calendarRouter.get("/events", async (req, res, next) => {
   try {
+    const userId = res.locals.session.user.id as string;
     const start = req.query.start ? new Date(req.query.start as string) : undefined;
     const end = req.query.end ? new Date(req.query.end as string) : undefined;
-    const events = await getEvents(start, end);
+    const events = await getEvents(userId, start, end);
     res.json(
       events.map((e) => ({
         id: e.id,
@@ -89,6 +90,7 @@ calendarRouter.get("/events", async (req, res, next) => {
         contactId: e.contactId ?? "",
         contactName: e.contactName ?? e.title,
         channel: e.channel,
+        tzOffset: (e as any).tzOffset ?? 0,
         location: e.location ?? undefined,
         description: e.description ?? undefined,
         htmlLink: e.htmlLink ?? undefined,

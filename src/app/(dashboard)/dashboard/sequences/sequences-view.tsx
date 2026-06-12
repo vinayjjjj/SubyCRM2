@@ -8,6 +8,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import type { PlatformType } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 
 const STATUS_META: Record<StepStatus, { label: string; color: string; bg: string }> = {
   sent:      { label: "Sent",      color: "var(--gc)", bg: "var(--gb)" },
@@ -42,7 +43,7 @@ export function SequencesView() {
         setSeqs(data as Sequence[]);
         if (data.length > 0) setExpanded(data[0].id);
       })
-      .catch(console.error)
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
@@ -65,7 +66,7 @@ export function SequencesView() {
 
   const removeSeq = (id: string) => {
     setSeqs((prev) => prev.filter((s) => s.id !== id));
-    sequenceApi.remove(id).catch(console.error);
+    sequenceApi.remove(id).catch((e: any) => toast.error(e?.message ?? "Failed to remove sequence"));
   };
 
   const addSeq = async (data: { contactName: string; company: string; goal: string; channel: string }) => {

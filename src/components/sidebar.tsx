@@ -23,7 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { remindersApi, inboxApi } from "@/lib/api";
+import { remindersApi, inboxApi, calendarApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +31,7 @@ type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  badgeKey?: "overdue" | "unread_inbox";
+  badgeKey?: "overdue" | "unread_inbox" | "today_calls";
 };
 
 const SECTIONS: { label: string; items: NavItem[] }[] = [
@@ -60,7 +60,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Schedule",
     items: [
-      { label: "Pre-call", href: "/dashboard/prep", icon: CalendarDays },
+      { label: "Pre-call", href: "/dashboard/prep", icon: CalendarDays, badgeKey: "today_calls" },
       { label: "Reminders", href: "/dashboard/reminders", icon: Clock3, badgeKey: "overdue" },
       { label: "Voice", href: "/dashboard/voice", icon: Mic },
     ],
@@ -78,6 +78,7 @@ export default function Sidebar() {
   const [open, setOpen] = useState(false);
   const [overdueCount, setOverdueCount] = useState(0);
   const [unreadInbox, setUnreadInbox] = useState(0);
+  const [todayCalls, setTodayCalls] = useState(0);
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
@@ -107,11 +108,29 @@ export default function Sidebar() {
       .then((reminders) => setOverdueCount(reminders.length))
       .catch(() => {});
 
+    const fetchTodayCalls = () => {
+      const todayStart = new Date();
+      todayStart.setUTCHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setUTCHours(23, 59, 59, 999);
+      calendarApi
+        .getEvents(todayStart.toISOString(), todayEnd.toISOString())
+        .then((evs) => setTodayCalls(evs.length))
+        .catch(() => {});
+    };
+    fetchTodayCalls();
+    window.addEventListener("calendar-synced", fetchTodayCalls);
+
     const refreshInbox = () => inboxApi.getStats().then((s) => setUnreadInbox(s.unread)).catch(() => {});
     refreshInbox();
     const interval = setInterval(refreshInbox, 30000);
     window.addEventListener("inbox-read", refreshInbox);
-    return () => { clearInterval(interval); window.removeEventListener("inbox-read", refreshInbox); };
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("inbox-read", refreshInbox);
+      window.removeEventListener("calendar-synced", fetchTodayCalls);
+    };
   }, []);
 
   const isActive = (href: string) =>
@@ -171,7 +190,7 @@ export default function Sidebar() {
               <nav className="grid gap-0.5 px-2">
                 {section.items.map((item) => {
                   const active = isActive(item.href);
-                  const badge = item.badgeKey === "overdue" ? overdueCount : item.badgeKey === "unread_inbox" ? unreadInbox : 0;
+                  const badge = item.badgeKey === "overdue" ? overdueCount : item.badgeKey === "unread_inbox" ? unreadInbox : item.badgeKey === "today_calls" ? todayCalls : 0;
                   const Icon = item.icon;
 
                   return (
@@ -193,7 +212,13 @@ export default function Sidebar() {
                       />
                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
                       {badge > 0 && (
-                        <span className="grid min-w-5 place-items-center rounded-full bg-status-red-bg px-1.5 text-[10px] font-semibold leading-5 text-status-red animate-fade-in">
+                        <span
+                          className="grid min-w-5 place-items-center rounded-full px-1.5 text-[10px] font-semibold leading-5 animate-fade-in"
+                          style={item.badgeKey === "today_calls"
+                            ? { background: "var(--bb)", color: "var(--bc)" }
+                            : { background: "var(--status-red-bg, rgba(239,68,68,0.15))", color: "var(--status-red, #ef4444)" }
+                          }
+                        >
                           {badge}
                         </span>
                       )}

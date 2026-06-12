@@ -75,7 +75,7 @@ export function VoiceView() {
         setStats(st);
         if (caps.length > 0) setExpanded(caps[0].id);
       })
-      .catch(console.error)
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 

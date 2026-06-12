@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { calendarApi, gmailApi, discordApi, slackApi, xApi, whatsappApi, telegramPersonalApi, linkedinApi, telegramBotApi, beeperApi } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
+import { toast } from "sonner";
 import { ImportView } from "../import/import-view";
 
 type Status = "connected" | "disconnected" | "error";
@@ -312,8 +313,8 @@ function TelegramPersonalModal({ hasEnvCreds, onClose }: { hasEnvCreds?: boolean
             if (status.error) {
               setQrError(status.error);
             }
-          } catch (e: any) {
-            console.error("Error polling Telegram QR status", e);
+          } catch {
+            // polling error — will retry on next interval
           }
           if (active && !qrConnected) {
             timeoutId = setTimeout(poll, 2000);
@@ -873,7 +874,7 @@ export function SettingsView() {
       setTimeout(() => setSyncing("beeper-done"), 0);
       setTimeout(() => setSyncing(null), 3000);
     } catch (e: any) {
-      alert(`Beeper sync failed: ${e.message || "Unknown error"}`);
+      toast.error(`Beeper sync failed: ${e.message || "Unknown error"}`);
       setSyncing(null);
     }
   };
@@ -884,7 +885,7 @@ export function SettingsView() {
       await xApi.sync();
       reload(userId);
     } catch (e: any) {
-      alert(`X sync failed: ${e.message || "Unknown error"}`);
+      toast.error(`X sync failed: ${e.message || "Unknown error"}`);
     } finally {
       setSyncing(null);
     }
@@ -893,28 +894,28 @@ export function SettingsView() {
   const syncGmail = async () => {
     setSyncing("gmail");
     try { await gmailApi.sync(); reload(userId); }
-    catch (e: any) { alert(`Gmail sync failed: ${e.message || "Unknown error"}`); }
+    catch (e: any) { toast.error(`Gmail sync failed: ${e.message || "Unknown error"}`); }
     finally { setSyncing(null); }
   };
 
   const syncSlack = async () => {
     setSyncing("slack");
     try { await slackApi.sync(); reload(userId); }
-    catch (e: any) { alert(`Slack sync failed: ${e.message || "Unknown error"}`); }
+    catch (e: any) { toast.error(`Slack sync failed: ${e.message || "Unknown error"}`); }
     finally { setSyncing(null); }
   };
 
   const syncDiscord = async () => {
     setSyncing("discord");
     try { await discordApi.sync(); reload(userId); }
-    catch (e: any) { alert(`Discord sync failed: ${e.message || "Unknown error"}`); }
+    catch (e: any) { toast.error(`Discord sync failed: ${e.message || "Unknown error"}`); }
     finally { setSyncing(null); }
   };
 
   const syncLinkedIn = async () => {
     setSyncing("linkedin");
     try { await linkedinApi.sync(); reload(userId); }
-    catch (e: any) { alert(`LinkedIn sync failed: ${e.message || "Unknown error"}`); }
+    catch (e: any) { toast.error(`LinkedIn sync failed: ${e.message || "Unknown error"}`); }
     finally { setSyncing(null); }
   };
 
@@ -925,7 +926,7 @@ export function SettingsView() {
       else await telegramPersonalApi.sync();
       reload(userId);
     } catch (e: any) {
-      alert(`Sync failed: ${e.message || "Unknown error"}`);
+      toast.error(`Sync failed: ${e.message || "Unknown error"}`);
     } finally {
       setSyncing(null);
     }

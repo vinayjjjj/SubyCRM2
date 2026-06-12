@@ -23,6 +23,7 @@ export interface Contact {
   platforms?: Platform[];
   interactions?: Interaction[];
   notes?: Note[];
+  reminders?: Reminder[];
   contactTags?: ContactTag[];
   _count?: { interactions: number; notes: number };
 }

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { STAGE_META, STAGES_ORDERED, type Deal, type DealStage } from "@/lib/mock-pipeline";
 import { pipelineApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 function initials(name: string): string {
   return name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("");
@@ -36,7 +37,7 @@ export function PipelineView() {
   useEffect(() => {
     pipelineApi.list()
       .then((data) => setDeals(data as Deal[]))
-      .catch(console.error)
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
@@ -63,7 +64,7 @@ export function PipelineView() {
     );
     pipelineApi.update(id, { stage: target, probability: DEFAULT_PROB[target] }).catch(() => {
       // rollback on error
-      pipelineApi.list().then((data) => setDeals(data as Deal[])).catch(console.error);
+      pipelineApi.list().then((data) => setDeals(data as Deal[])).catch(() => {});
     });
   };
 
@@ -75,7 +76,7 @@ export function PipelineView() {
 
   const removeDeal = (id: string) => {
     setDeals((prev) => prev.filter((d) => d.id !== id));
-    pipelineApi.remove(id).catch(console.error);
+    pipelineApi.remove(id).catch((e: any) => toast.error(e?.message ?? "Failed to remove deal"));
   };
 
   if (loading) return <PipelineSkeleton />;
