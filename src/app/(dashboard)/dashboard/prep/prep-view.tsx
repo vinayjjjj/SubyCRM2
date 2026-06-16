@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { calendarApi, aiApi, contactsApi, remindersApi } from "@/lib/api";
+import { getCached, setCached } from "@/lib/page-cache";
 
 const HOUR_HEIGHT = 48; // px per hour
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -114,7 +115,8 @@ function eventTone(e: CalendarEvent): { bg: string; border: string; color: strin
 export function PrepView() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [selected, setSelected] = useState<CalendarEvent | null>(null);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const cachedEvents = getCached<CalendarEvent[]>("prep:events");
+  const [events, setEvents] = useState<CalendarEvent[]>(cachedEvents ?? []);
   const [calStatus, setCalStatus] = useState<{ connected: boolean; lastSync: string | null } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [calError, setCalError] = useState<string | null>(null);
@@ -128,6 +130,7 @@ export function PrepView() {
       const result = await calendarApi.sync() as { synced: number };
       const data = await calendarApi.getEvents();
       setEvents(data as unknown as CalendarEvent[]);
+      setCached("prep:events", data);
       const status = await calendarApi.status();
       setCalStatus(status);
       window.dispatchEvent(new Event("calendar-synced"));
@@ -151,7 +154,7 @@ export function PrepView() {
         if (status.connected) {
           // Load cached events immediately so the calendar isn't blank
           calendarApi.getEvents()
-            .then((data) => setEvents(data as unknown as CalendarEvent[]))
+            .then((data) => { setEvents(data as unknown as CalendarEvent[]); setCached("prep:events", data); })
             .catch(() => {});
           // Background sync to pick up additions AND deletions
           runSync(true);

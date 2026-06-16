@@ -64,6 +64,15 @@ router.get("/stats", async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.get("/search", async (req, res, next) => {
+  try {
+    const userId = res.locals.session?.user?.id ?? "default";
+    const { q } = req.query as { q?: string };
+    if (!q?.trim()) { res.json([]); return; }
+    res.json(await inboxService.searchMessages(q.trim(), userId));
+  } catch (err) { next(err); }
+});
+
 router.post("/mark-read", async (req, res, next) => {
   try {
     const userId = res.locals.session?.user?.id ?? "default";
@@ -104,8 +113,8 @@ router.delete("/:id", async (req, res, next) => {
 router.patch("/:id", async (req, res, next) => {
   try {
     const userId = res.locals.session?.user?.id ?? "default";
-    const { read, starred } = req.body as { read?: boolean; starred?: boolean };
-    res.json(await inboxService.updateMessage(req.params.id, { read, starred }, userId));
+    const { read, starred, body } = req.body as { read?: boolean; starred?: boolean; body?: string };
+    res.json(await inboxService.updateMessage(req.params.id, { read, starred, body }, userId));
   } catch (err) { next(err); }
 });
 
@@ -125,13 +134,13 @@ router.post("/:id/react", async (req, res, next) => {
 
 router.post("/:id/reply", async (req, res, next) => {
   try {
-    const { body, replyToId, contactId, platform, senderId } = req.body as {
+    const { body, replyToId, contactId, platform, senderId, tempId: clientTempId } = req.body as {
       body: string; replyToId?: string;
-      contactId?: string; platform?: string; senderId?: string;
+      contactId?: string; platform?: string; senderId?: string; tempId?: string;
     };
     if (!body?.trim()) { res.status(400).json({ error: "body required" }); return; }
     const userId = res.locals.session?.user?.id;
-    await inboxService.reply(req.params.id, body.trim(), userId, replyToId, { contactId, platform, senderId });
+    await inboxService.reply(req.params.id, body.trim(), userId, replyToId, { contactId, platform, senderId }, clientTempId);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

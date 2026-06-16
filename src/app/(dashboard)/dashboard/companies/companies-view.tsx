@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
+import { getCached, setCached } from "@/lib/page-cache";
 
 const CATEGORIES = ["all", "payment", "crypto", "vc", "partner"] as const;
 type CategoryFilter = (typeof CATEGORIES)[number];
@@ -50,18 +51,20 @@ function relativeDate(dateStr: string | null): string {
 
 export function CompaniesView() {
   const router = useRouter();
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached<Company[]>("companies:list");
+  const [companies, setCompanies] = useState<Company[]>(cached ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedFull, setSelectedFull] = useState<Company | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
 
   useEffect(() => {
     companiesApi.getAll()
-      .then((data) => setCompanies(data ?? []))
+      .then((data) => { setCompanies(data ?? []); setCached("companies:list", data ?? []); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -113,7 +116,10 @@ export function CompaniesView() {
 
       <div className="grid gap-4 flex-1 min-h-0 [grid-template-columns:320px_1fr] max-[900px]:[grid-template-columns:1fr]">
         {/* Left pane: list */}
-        <div className="rounded-xl border border-border bg-card shadow-sm flex flex-col overflow-hidden p-0">
+        <div className={cn(
+          "rounded-xl border border-border bg-card shadow-sm flex flex-col overflow-hidden p-0",
+          mobileDetailOpen && "max-[900px]:hidden"
+        )}>
           <div className="p-3 border-b border-border flex flex-col gap-2.5">
             <input
               placeholder="Search name, sector, funding..."
@@ -156,7 +162,7 @@ export function CompaniesView() {
                 return (
                   <button
                     key={c.id}
-                    onClick={() => setSelectedId(c.id)}
+                    onClick={() => { setSelectedId(c.id); setMobileDetailOpen(true); }}
                     className={cn(
                       "w-full flex items-center gap-2.5 p-2.5 px-3.5 border-0 border-b border-border cursor-pointer text-left transition-colors hover:bg-secondary",
                       isActive ? "bg-accent border-l-2 border-primary" : "bg-transparent border-l-2 border-transparent"
@@ -189,7 +195,16 @@ export function CompaniesView() {
         </div>
 
         {/* Right pane: detail */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-y-auto px-7 py-6">
+        <div className={cn(
+          "rounded-xl border border-border bg-card shadow-sm overflow-y-auto px-7 py-6",
+          !mobileDetailOpen && "max-[900px]:hidden"
+        )}>
+          <button
+            onClick={() => setMobileDetailOpen(false)}
+            className="hidden max-[900px]:flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4 -mt-1"
+          >
+            ← Back
+          </button>
           {detailLoading ? (
             <div className="flex items-center justify-center py-20">
               <span className="inline-block size-5 rounded-full border-2 border-current border-t-transparent animate-spin text-muted-foreground" />

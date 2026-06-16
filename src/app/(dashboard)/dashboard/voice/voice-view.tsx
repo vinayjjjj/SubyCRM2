@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { voiceApi, telegramBotApi, type VoiceCaptureApi } from "@/lib/api";
+import { getCached, setCached } from "@/lib/page-cache";
 import { Button } from "@/components/ui/button";
 
 const SIMULATE_PROMPTS = [
@@ -55,9 +56,10 @@ function fakeWave(seed: number, bars = 18): number[] {
 
 export function VoiceView() {
   const router = useRouter();
-  const [captures, setCaptures] = useState<VoiceCaptureApi[]>([]);
+  const cachedCaptures = getCached<VoiceCaptureApi[]>("voice:captures");
+  const [captures, setCaptures] = useState<VoiceCaptureApi[]>(cachedCaptures ?? []);
   const [stats, setStats] = useState({ total: 0, processed: 0, failed: 0, actions: 0 });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedCaptures);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [simText, setSimText] = useState("");
   const [simulating, setSimulating] = useState(false);
@@ -73,7 +75,8 @@ export function VoiceView() {
       .then(([caps, st]) => {
         setCaptures(caps);
         setStats(st);
-        if (caps.length > 0) setExpanded(caps[0].id);
+        setCached("voice:captures", caps);
+        if (!cachedCaptures && caps.length > 0) setExpanded(caps[0].id);
       })
       .catch(() => {})
       .finally(() => setLoading(false));

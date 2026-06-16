@@ -22,6 +22,7 @@ export type SSEEvent =
   | "message_deleted"
   | "conversations_changed"
   | "send_failed"
+  | "send_confirmed"
   | "reminder_created"
   | "reminder_updated"
   | "reminder_deleted"

@@ -5,6 +5,8 @@ import { NetworkSkeleton } from "@/components/ui/skeleton";
 import { useRouter } from "next/navigation";
 import type { Contact } from "@/lib/types";
 import { contactsApi } from "@/lib/api";
+import { getCached, setCached } from "@/lib/page-cache";
+import { cn } from "@/lib/utils";
 
 type Sector = "payment" | "blockchain" | "vc" | "infra" | "fintech" | "ai" | "other";
 type Filter = Sector | "all";
@@ -176,8 +178,9 @@ function buildFocusedNodes(
 
 export function NetworkView() {
   const router = useRouter();
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached<Contact[]>("network:contacts");
+  const [contacts, setContacts] = useState<Contact[]>(cached ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [hovered, setHovered] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const W = 920;
@@ -185,7 +188,7 @@ export function NetworkView() {
 
   useEffect(() => {
     contactsApi.getAll({ limit: "500" })
-      .then((res) => setContacts(res.data))
+      .then((res) => { setContacts(res.data); setCached("network:contacts", res.data); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -293,10 +296,10 @@ export function NetworkView() {
       </div>
 
       {/* Graph + side panel */}
-      <div
-        className="grid gap-3"
-        style={{ gridTemplateColumns: filter !== "all" ? "1fr 280px" : "1fr" }}
-      >
+      <div className={cn(
+        "grid gap-3",
+        filter !== "all" ? "grid-cols-1 md:grid-cols-[1fr_280px]" : "grid-cols-1"
+      )}>
         <div className="rounded-xl border border-border bg-card shadow-sm p-3 overflow-auto">
           <svg width={W} height={H} style={{ display: "block" }}>
             {/* Cluster zones (only in All view) */}

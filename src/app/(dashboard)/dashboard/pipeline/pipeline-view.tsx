@@ -97,9 +97,10 @@ export function PipelineView() {
         <NewDealForm onSubmit={addDeal} onCancel={() => setShowForm(false)} />
       )}
 
+      <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0 pb-2">
       <div
         className="grid gap-2.5 items-start"
-        style={{ gridTemplateColumns: `repeat(${STAGES_ORDERED.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${STAGES_ORDERED.length}, minmax(195px, 1fr))` }}
       >
         {STAGES_ORDERED.map((stage) => {
           const meta = STAGE_META[stage];
@@ -157,6 +158,7 @@ export function PipelineView() {
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );

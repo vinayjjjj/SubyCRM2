@@ -39,7 +39,7 @@ const NETWORK_TO_PLATFORM: Record<string, string> = {
 // Matrix filter — only receive message events, nothing else
 const LONG_POLL_FILTER = JSON.stringify({
   room: {
-    timeline: { types: ["m.room.message", "m.room.encrypted"], limit: 10 },
+    timeline: { types: ["m.room.message", "m.room.encrypted", "m.room.redaction"], limit: 10 },
     state: { types: [] },
     ephemeral: { not_types: ["*"] },
     account_data: { not_types: ["*"] },
@@ -251,6 +251,9 @@ export const beeperService = {
     const run = async () => {
       console.log(`[beeper-poll] Starting real-time long-poll for user=${userId}`);
       let backoffMs = 0;
+      let sessionCache: any = null;
+      let sessionCacheAt = 0;
+      const SESSION_CACHE_TTL = 30_000; // re-read from DB every 30s
 
       try {
       while (!controller.signal.aborted) {
@@ -260,13 +263,17 @@ export const beeperService = {
           backoffMs = 0;
         }
 
-        let session: any;
-        try {
-          session = await (prisma as any).beeperSession.findUnique({ where: { userId } });
-        } catch {
-          backoffMs = 5000;
-          continue;
+        // Re-read session from DB only when cache expires (avoids a DB query on every loop)
+        if (!sessionCache || Date.now() - sessionCacheAt > SESSION_CACHE_TTL) {
+          try {
+            sessionCache = await (prisma as any).beeperSession.findUnique({ where: { userId } });
+            sessionCacheAt = Date.now();
+          } catch {
+            backoffMs = 5000;
+            continue;
+          }
         }
+        const session = sessionCache;
 
         if (!session?.connected) {
           console.log(`[beeper-poll] Session disconnected for user=${userId}, stopping`);
@@ -331,43 +338,69 @@ export const beeperService = {
           continue;
         }
 
+        // Handle redactions directly from the Matrix sync event — don't wait for syncSingleChat.
+        // m.room.redaction has a `redacts` field with the Matrix event ID of the deleted message.
+        // We store externalId as `bl-{beeper-id}` but Beeper sometimes uses the Matrix event ID
+        // as the `id`, so we try both formats.
+        for (const [, roomData] of Object.entries(rooms)) {
+          const timelineEvents: any[] = (roomData as any).timeline?.events ?? [];
+          for (const e of timelineEvents) {
+            if (e.type !== "m.room.redaction") continue;
+            const redactedId: string | undefined = e.redacts ?? e.content?.redacts;
+            if (!redactedId) continue;
+            // Try bare ID, bl-prefixed, and without the leading $ (Matrix event ID format)
+            const barId = redactedId.startsWith("$") ? redactedId.slice(1) : redactedId;
+            const candidates = [`bl-${barId}`, barId, redactedId];
+            for (const externalId of candidates) {
+              const deletedRow = await (prisma as any).inboxMessage.findFirst({
+                where: { externalId, userId },
+                select: { id: true },
+              }).catch(() => null);
+              if (deletedRow) {
+                await (prisma as any).inboxMessage.delete({ where: { id: deletedRow.id } }).catch(() => {});
+                broadcastInboxEvent("message_deleted", { id: deletedRow.id });
+                console.log(`[beeper-poll] redaction: removed message externalId=${externalId}`);
+                break;
+              }
+            }
+          }
+        }
+
         const activeRooms = Object.entries(rooms).filter(([, roomData]) => {
           const timelineEvents: any[] = (roomData as any).timeline?.events ?? [];
           return timelineEvents.some((e: any) =>
-            // redactions = message deletions — must also trigger a sync so the
-            // isDeleted flag is picked up and the inbox row removed
             e.type === "m.room.message" || e.type === "m.room.encrypted" || e.type === "m.room.redaction"
           );
         });
 
-        // Wait for Beeper's local bridge to finish processing the event before we fetch.
-        // Without this delay the local API often returns stale results (race condition).
+        // Brief pause so Beeper's local bridge can process the Matrix event before we fetch.
+        // 300ms is enough for the bridge to decrypt + store; reduced from 1500ms.
         if (activeRooms.length > 0) {
-          await new Promise((r) => setTimeout(r, 1500));
+          await new Promise((r) => setTimeout(r, 300));
           if (controller.signal.aborted) break;
         }
 
-        // Process rooms sequentially to avoid saturating the DB connection pool
-        for (const [roomId] of activeRooms) {
-          if (controller.signal.aborted) break;
+        // Process all active rooms in parallel — independent chats don't need to be sequential
+        await Promise.all(activeRooms.map(async ([roomId]) => {
+          if (controller.signal.aborted) return;
 
           const { synced } = await beeperService.syncSingleChat(userId, roomId, localToken, localEndpoint).catch((err) => {
             console.warn(`[beeper-poll] syncSingleChat failed room=${roomId}: ${err.message}`);
             return { synced: 0 };
           });
 
-          // Retry with longer delays — local API may still be catching up
+          // Retry with shorter delays — bridge usually catches up within a second
           if (synced === 0) {
-            await new Promise((r) => setTimeout(r, 3000));
-            if (controller.signal.aborted) break;
+            await new Promise((r) => setTimeout(r, 800));
+            if (controller.signal.aborted) return;
             const { synced: synced2 } = await beeperService.syncSingleChat(userId, roomId, localToken, localEndpoint).catch(() => ({ synced: 0 }));
             if (synced2 === 0) {
-              await new Promise((r) => setTimeout(r, 6000));
-              if (controller.signal.aborted) break;
+              await new Promise((r) => setTimeout(r, 1500));
+              if (controller.signal.aborted) return;
               await beeperService.syncSingleChat(userId, roomId, localToken, localEndpoint).catch(() => {});
             }
           }
-        }
+        }));
 
         // Save nextBatch AFTER processing all rooms — ensures we never advance past an
         // event we failed to process (missing messages would be unrecoverable otherwise)
@@ -376,6 +409,8 @@ export const beeperService = {
             where: { userId },
             data: { nextBatch, lastSyncAt: new Date() },
           }).catch(() => {});
+          // Update in-memory cache so next loop uses the fresh since token without a DB read
+          if (sessionCache) sessionCache = { ...sessionCache, nextBatch };
         }
       }
 
@@ -533,16 +568,18 @@ export const beeperService = {
 
     for (const msg of messages) {
       // Deleted on the source platform → remove from the inbox too
-      if (msg.isDeleted) {
+      // Beeper may use `isDeleted` or `deleted` depending on the bridge version
+      if (msg.isDeleted || msg.deleted) {
+        const externalId = `bl-${msg.id}`;
         const deletedRow = await (prisma as any).inboxMessage.findFirst({
-          where: { platform: platform as any, externalId: `bl-${msg.id}`, userId },
+          where: { platform: platform as any, externalId, userId },
           select: { id: true },
         });
         if (deletedRow) {
           await (prisma as any).inboxMessage.delete({ where: { id: deletedRow.id } }).catch(() => {});
           broadcastInboxEvent("message_deleted", { id: deletedRow.id });
-          console.log(`[beeper-sync] removed deleted message bl-${msg.id}`);
-          synced++; // counts as processed — stops the long-poll retrying this room
+          console.log(`[beeper-sync] removed deleted message ${externalId}`);
+          synced++;
         }
         continue;
       }
@@ -1169,7 +1206,8 @@ export const beeperService = {
 
     // If the text contains a media attachment, send it as a proper media message
     console.log(`[beeper-send] sendMessage roomId=${roomId} platform=${platform} textLen=${text.length} textPreview=${JSON.stringify(text.slice(0, 80))}`);
-    const mediaMatch = text.match(/!\[([^\]]*)\]\((\/media\/([^)]+))\)/);
+    // Match both image markdown ![name](/media/...) and file markdown [name](/media/...)
+    const mediaMatch = text.match(/!?\[([^\]]*)\]\((\/media\/([^)]+))\)/);
     if (mediaMatch) {
       const caption = text.replace(mediaMatch[0], "").trim();
       const relPath = mediaMatch[2]; // e.g. /media/filename.jpg
@@ -1181,14 +1219,25 @@ export const beeperService = {
     if (localToken) {
       const localApi = getLocalApi(session);
       console.log(`[beeper-send] Sending via local API platform=${platform} roomId=${roomId} endpoint=${localApi} replyTo=${replyToMessageID ?? "-"}`);
-      const res = await fetch(`${localApi}/v1/chats/${encodeURIComponent(roomId)}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${localToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ text, ...(replyToMessageID ? { replyToMessageID } : {}) }),
-      });
+      let res: Response;
+      try {
+        res = await fetch(`${localApi}/v1/chats/${encodeURIComponent(roomId)}/messages`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${localToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ text, ...(replyToMessageID ? { replyToMessageID } : {}) }),
+        });
+      } catch (networkErr: any) {
+        throw new Error("Beeper Desktop is not open — please open Beeper on your computer");
+      }
       if (!res.ok) {
         const errText = await res.text().catch(() => "");
-        throw new Error(`Local Beeper API send failed: ${res.statusText} ${errText}`);
+        if (res.status === 502 || res.status === 503 || errText.includes("ERR_NGROK_8012") || errText.includes("Bad Gateway"))
+          throw new Error("Beeper Desktop is not open — please open Beeper on your computer");
+        if (errText.includes("ERR_NGROK_725") || errText.includes("bandwidth"))
+          throw new Error("ngrok bandwidth limit reached — update your Local Endpoint URL in Settings");
+        if (res.status === 401 || res.status === 403)
+          throw new Error("Beeper token invalid — reconnect Beeper in Settings");
+        throw new Error(`Local Beeper API send failed (${res.status})`);
       }
       const data = await res.json() as { pendingMessageID: string };
       return data.pendingMessageID;
@@ -1204,7 +1253,11 @@ export const beeperService = {
         body: JSON.stringify({ msgtype: "m.text", body: text }),
       }
     );
-    if (!res.ok) throw new Error(`Matrix send failed: ${res.statusText}`);
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403)
+        throw new Error("Beeper session expired — reconnect Beeper in Settings");
+      throw new Error(`Matrix send failed (${res.status}) — reconnect Beeper in Settings`);
+    }
     const data = await res.json() as { event_id: string };
     return data.event_id;
   },
@@ -1230,6 +1283,22 @@ export const beeperService = {
       const errText = await res.text().catch(() => "");
       throw new Error(`Beeper reaction failed (${res.status}): ${errText}`);
     }
+  },
+
+  // Mark a Beeper room as read so WhatsApp/other platforms clear the unread badge.
+  // Tries POST /v1/chats/:roomId/read (Beeper Desktop API). Silently no-ops if unsupported.
+  async markRoomRead(userId: string, roomId: string): Promise<void> {
+    try {
+      const session = await (prisma as any).beeperSession.findUnique({ where: { userId } }).catch(() => null);
+      const localToken = session?.localToken || process.env.BEEPER_LOCAL_TOKEN;
+      if (!localToken || !roomId) return;
+      const localApi = getLocalApi(session);
+      await fetch(`${localApi}/v1/chats/${encodeURIComponent(roomId)}/read`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localToken}`, "Content-Type": "application/json" },
+        body: "{}",
+      });
+    } catch {}
   },
 
   async sendMediaFile(

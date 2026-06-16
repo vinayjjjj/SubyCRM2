@@ -62,8 +62,28 @@ export const inboxService = {
       if (msg.starred) conv.starred = true;
     }
 
-    return Array.from(map.values())
-      .sort((a, b) => +new Date(b.latestMessage.receivedAt) - +new Date(a.latestMessage.receivedAt));
+    // Always resolve contact names from the Contact table — it's the source of truth.
+    // Message rows store whatever name Beeper had at sync time, which goes stale when
+    // the user renames a contact in Suby.
+    const convs = Array.from(map.values());
+    const withContact = convs.filter((c) => c.contactId);
+    if (withContact.length > 0) {
+      const ids = withContact.map((c) => c.contactId!);
+      const contacts = await (prisma as any).contact.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true },
+      });
+      const nameMap = new Map<string, string>(contacts.map((c: any) => [c.id, c.name]));
+      for (const conv of withContact) {
+        const name = nameMap.get(conv.contactId!) ?? null;
+        if (name) {
+          conv.contactName = name;
+          conv.latestMessage = { ...conv.latestMessage, contactName: name };
+        }
+      }
+    }
+
+    return convs.sort((a, b) => +new Date(b.latestMessage.receivedAt) - +new Date(a.latestMessage.receivedAt));
   },
 
   async getThread(contactId: string, platform: string, _userId: string = "default") {
@@ -100,6 +120,23 @@ export const inboxService = {
     });
   },
 
+  async searchMessages(query: string, userId: string = "default") {
+    const q = query.trim();
+    if (!q) return [];
+    return (prisma as any).inboxMessage.findMany({
+      where: {
+        userId,
+        OR: [
+          { body: { contains: q, mode: "insensitive" } },
+          { preview: { contains: q, mode: "insensitive" } },
+          { contactName: { contains: q, mode: "insensitive" } },
+        ],
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 30,
+    });
+  },
+
   async getStats(userId: string = "default") {
     const [total, starred, unreadConvGroups] = await Promise.all([
       (prisma as any).inboxMessage.count({ where: { userId, contactId: { not: null } } }),
@@ -113,8 +150,10 @@ export const inboxService = {
     return { total, unread, starred };
   },
 
-  async updateMessage(id: string, data: { read?: boolean; starred?: boolean }, userId: string = "default") {
-    return (prisma as any).inboxMessage.update({ where: { id, userId }, data });
+  async updateMessage(id: string, data: { read?: boolean; starred?: boolean; body?: string }, userId: string = "default") {
+    const update: Record<string, unknown> = { ...data };
+    if (data.body !== undefined) update.preview = data.body.slice(0, 120);
+    return (prisma as any).inboxMessage.update({ where: { id, userId }, data: update });
   },
 
   async markConversationRead(contactId: string, platform: string, userId: string = "default") {
@@ -122,6 +161,20 @@ export const inboxService = {
       where: { userId, contactId, platform, read: false },
       data: { read: true },
     });
+    // Also tell Beeper to clear the unread badge on the native platform (WhatsApp, etc.)
+    void (async () => {
+      try {
+        const latestMsg = await (prisma as any).inboxMessage.findFirst({
+          where: { userId, contactId, platform, matrixRoomId: { not: null } },
+          orderBy: { receivedAt: "desc" },
+          select: { matrixRoomId: true },
+        });
+        if (latestMsg?.matrixRoomId) {
+          const { beeperService } = await import("./beeper.service");
+          await beeperService.markRoomRead(userId, latestMsg.matrixRoomId);
+        }
+      } catch {}
+    })();
     return result;
   },
 
@@ -133,10 +186,24 @@ export const inboxService = {
   },
 
   async markUnknownConversationRead(senderId: string, platform: string, userId: string = "default") {
-    return (prisma as any).inboxMessage.updateMany({
+    const result = await (prisma as any).inboxMessage.updateMany({
       where: { userId, contactId: null, senderId, platform, read: false },
       data: { read: true },
     });
+    void (async () => {
+      try {
+        const latestMsg = await (prisma as any).inboxMessage.findFirst({
+          where: { userId, contactId: null, senderId, platform, matrixRoomId: { not: null } },
+          orderBy: { receivedAt: "desc" },
+          select: { matrixRoomId: true },
+        });
+        if (latestMsg?.matrixRoomId) {
+          const { beeperService } = await import("./beeper.service");
+          await beeperService.markRoomRead(userId, latestMsg.matrixRoomId);
+        }
+      } catch {}
+    })();
+    return result;
   },
 
   async deleteMessage(id: string, userId: string = "default") {
@@ -257,7 +324,7 @@ export const inboxService = {
     return result;
   },
 
-  async reply(id: string, text: string, userId?: string, replyToId?: string, ctx?: { contactId?: string; platform?: string; senderId?: string }): Promise<void> {
+  async reply(id: string, text: string, userId?: string, replyToId?: string, ctx?: { contactId?: string; platform?: string; senderId?: string }, clientTempId?: string): Promise<void> {
     let msg = await (prisma as any).inboxMessage.findUnique({ where: { id } });
     if (!msg && ctx?.contactId && ctx?.platform) {
       // Reference message may have been re-synced or deduped — fall back to most recent in conversation
@@ -266,10 +333,34 @@ export const inboxService = {
         orderBy: { receivedAt: "desc" },
       });
     }
+    if (!msg && ctx?.contactId && ctx?.platform) {
+      // Contact has no messages yet — look up their platform entry for the Beeper room ID.
+      // platformId is only usable if it's a Matrix room ID (starts with '!').
+      // Phone numbers and usernames can't be used to route a send via Beeper.
+      const platformEntry = await (prisma as any).platform.findFirst({
+        where: { contactId: ctx.contactId, type: ctx.platform },
+      });
+      if (platformEntry && platformEntry.platformId?.startsWith("!")) {
+        const contactRecord = await (prisma as any).contact.findUnique({
+          where: { id: ctx.contactId },
+          select: { name: true },
+        });
+        msg = {
+          matrixRoomId: platformEntry.platformId,
+          platform: ctx.platform,
+          contactId: ctx.contactId,
+          contactName: contactRecord?.name ?? null,
+          userId: userId ?? "default",
+        };
+      } else if (platformEntry) {
+        throw new Error("Can't send a first message here — open Beeper and message this contact there first");
+      }
+    }
     if (!msg) throw new Error("Message not found");
 
     // ── Save to DB immediately → SSE fires → UI updates in < 100ms ─────────────
-    const tempId = `sent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    // Use the frontend's tempId so SSE events (send_confirmed/send_failed) match the optimistic bubble
+    const tempId = clientTempId || `sent-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     // Pre-fetch quoted message so the quote bubble shows in inbox immediately
     let quotedOriginal: any = null;
     if (replyToId) {
@@ -296,6 +387,7 @@ export const inboxService = {
     void (async () => {
       let telegramChatId: string | null = null;
       let toEmail: string | null = null;
+      let canonicalId: string = tempId;
 
       try {
         // ── Resolve destination in background ─────────────────────────────────────────
@@ -328,7 +420,7 @@ export const inboxService = {
 
           // Immediately fetch the message's local Beeper ID so we store it with the same
           // bl-{id} format the sync uses — this prevents duplicates on the next sync tick.
-          let canonicalId: string = tempId;
+          // canonicalId is declared in the outer scope (defaults to tempId)
           const beeperSess = await (prisma as any).beeperSession.findUnique({ where: { userId: userId ?? "default" } }).catch(() => null);
           const localToken = beeperSess?.localToken || process.env.BEEPER_LOCAL_TOKEN;
           const beeperEndpoint = (beeperSess?.localEndpoint || "").trim().replace(/\/$/, "") || "http://localhost:23373";
@@ -433,6 +525,8 @@ export const inboxService = {
             threadId: gmailThreadId,
           });
         }
+        console.log(`[inbox] send_confirmed → tempId=${tempId} canonicalId=${canonicalId}`);
+        broadcastInboxEvent("send_confirmed", { tempId, canonicalId, contactId: msg.contactId, platform: msg.platform });
       } catch (err: any) {
         const errMsg = err?.message ?? "Unknown error";
         console.error(`[inbox] Background send failed (${msg.platform}):`, err);

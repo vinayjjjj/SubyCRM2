@@ -10,9 +10,15 @@ import { Button } from "@/components/ui/button";
 import { getCached, setCached } from "@/lib/page-cache";
 
 // Sent messages only in local state (not persisted)
+function cleanPreview(text: string): string {
+  return text
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, (_, name) => (name?.trim() ? `📷 ${name}` : "📷 Image"))
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "📎 $1");
+}
+
 interface SentMessage {
   id: string; body: string; sentAt: string; fromMe: true;
-  status?: "sending" | "sent" | "failed";
+  status?: "sending" | "sent" | "delivered" | "failed";
   quotedBody?: string | null;
   quotedFromMe?: boolean | null;
 }
@@ -135,6 +141,7 @@ export function InboxView() {
   const [replyingTo, setReplyingTo] = useState<InboxMessageApi | null>(null);
   const [reactionPickerId, setReactionPickerId] = useState<string | null>(null);
   const [localReactions, setLocalReactions] = useState<Record<string, string>>({});
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [typingContactIds, setTypingContactIds] = useState<Set<string>>(new Set());
   const [loadingMore, setLoadingMore] = useState(false);
   const [noMoreMessages, setNoMoreMessages] = useState(false);
@@ -147,9 +154,19 @@ export function InboxView() {
   const [addToContactsError, setAddToContactsError] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<{
     previewUrl: string; markdownTag: string; name: string; isImage: boolean;
+    uploading?: boolean; uploadProgress?: number; blobUrl?: string;
   } | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<InboxMessageApi[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const REACTIONS = ["👍", "❤️", "😂", "🙏", "😮", "😢"];
+  const EMOJI_LIST = [
+    "😀","😂","😊","😍","😎","🥹","😅","😭","🤔","🙄",
+    "👍","👎","❤️","🔥","🙏","💯","🎉","👀","💪","✨",
+    "😱","🤣","😤","🥳","😴","💀","🤯","😇","🤗","🫡",
+  ];
 
   // Formats browsers can actually render inline — everything else becomes a download link
   const RENDERABLE_IMAGE = new Set([
@@ -163,27 +180,47 @@ export function InboxView() {
       setSendError("HEIC/TIFF/BMP files can't be sent — convert to JPG or PNG first.");
       return;
     }
+    const isImage = RENDERABLE_IMAGE.has(file.type) || file.type.startsWith("video/");
+    // Show preview immediately — no server roundtrip needed for display
+    const blobUrl = URL.createObjectURL(file);
+    setPendingAttachment({ previewUrl: blobUrl, markdownTag: "", name: file.name, isImage, uploading: true, uploadProgress: 0, blobUrl });
     setUploading(true);
     setSendError("");
-    return new Promise<void>((resolve) => {
+
+    await new Promise<void>((resolve) => {
       const reader = new FileReader();
-      reader.onload = async (event) => {
+      reader.onload = (event) => {
         const fileData = event.target?.result as string;
-        if (!fileData) { setSendError("Failed to read file"); setUploading(false); resolve(); return; }
-        try {
-          const res = await inboxApi.upload(file.name, fileData);
-          const isImage = RENDERABLE_IMAGE.has(file.type) || file.type.startsWith("video/");
-          const markdownTag = isImage ? `![${file.name}](${res.url})` : `[${file.name}](${res.url})`;
-          // Show preview using the returned URL (relative path, works via Vercel proxy)
-          setPendingAttachment({ previewUrl: res.url, markdownTag, name: file.name, isImage });
-        } catch (err: any) {
-          setSendError(err.message || "Failed to upload attachment");
-        } finally {
+        if (!fileData) { setSendError("Failed to read file"); setUploading(false); setPendingAttachment(null); URL.revokeObjectURL(blobUrl); resolve(); return; }
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/inbox/upload");
+        xhr.withCredentials = true;
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setPendingAttachment((prev) => prev ? { ...prev, uploadProgress: Math.round(e.loaded / e.total * 100) } : prev);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText) as { url: string };
+              const markdownTag = isImage ? `![${file.name}](${res.url})` : `[${file.name}](${res.url})`;
+              setPendingAttachment({ previewUrl: blobUrl, markdownTag, name: file.name, isImage, uploading: false, uploadProgress: 100, blobUrl });
+            } catch { setSendError("Invalid upload response"); setPendingAttachment(null); URL.revokeObjectURL(blobUrl); }
+          } else {
+            try { setSendError(JSON.parse(xhr.responseText).error || `Upload failed (${xhr.status})`); }
+            catch { setSendError(`Upload failed (${xhr.status})`); }
+            setPendingAttachment(null);
+            URL.revokeObjectURL(blobUrl);
+          }
           setUploading(false);
           resolve();
-        }
+        };
+        xhr.onerror = () => { setSendError("Upload failed — check your connection"); setUploading(false); setPendingAttachment(null); URL.revokeObjectURL(blobUrl); resolve(); };
+        xhr.send(JSON.stringify({ filename: file.name, fileData }));
       };
-      reader.onerror = () => { setSendError("Failed to read file"); setUploading(false); resolve(); };
+      reader.onerror = () => { setSendError("Failed to read file"); setUploading(false); setPendingAttachment(null); URL.revokeObjectURL(blobUrl); resolve(); };
       reader.readAsDataURL(file);
     });
   };
@@ -193,6 +230,20 @@ export function InboxView() {
     if (!file || !selected) return;
     await uploadFile(file);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleSearch = (q: string) => {
+    setSearchQuery(q);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (!q.trim()) { setSearchResults([]); setSearchLoading(false); return; }
+    setSearchLoading(true);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await inboxApi.search(q.trim());
+        setSearchResults(results);
+      } catch { setSearchResults([]); }
+      finally { setSearchLoading(false); }
+    }, 300);
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -267,13 +318,33 @@ export function InboxView() {
     };
     fetchConvsRef.current = fetchConvs;
 
-    fetchConvs().then((convs) => {
-      if (!convs || convs.length === 0) return;
+    fetchConvs().then(async (convs) => {
       if (deepLinkContactId) {
-        const match = convs.find((c) => c.contactId === deepLinkContactId);
+        const match = convs?.find((c) => c.contactId === deepLinkContactId);
         if (match) { selectConversation(match); return; }
+        // Contact has no messages yet — fetch their info and open an empty thread
+        try {
+          const contact = await contactsApi.getById(deepLinkContactId);
+          const firstPlatform = contact?.platforms?.[0];
+          if (contact && firstPlatform) {
+            const synthetic: InboxConversationApi = {
+              key: `${deepLinkContactId}:${firstPlatform.type}`,
+              contactId: deepLinkContactId,
+              contactName: contact.name,
+              platform: firstPlatform.type as any,
+              senderId: firstPlatform.platformId,
+              latestMessage: null as any,
+              unreadCount: 0,
+              archived: false,
+              messageCount: 0,
+              starred: false,
+            };
+            selectConversation(synthetic);
+            return;
+          }
+        } catch {}
       }
-      if (!cached) selectConversation(convs[0]);
+      if (!cached && convs?.length) selectConversation(convs[0]);
     });
 
     // SSE for real-time push — conversations + active thread refresh on new messages
@@ -445,12 +516,62 @@ export function InboxView() {
       } catch {}
     });
 
+    es.addEventListener("send_confirmed", (e) => {
+      try {
+        const data = JSON.parse((e as any).data || "{}");
+        console.log("[inbox] send_confirmed received", data);
+        if (data.tempId) {
+          // Mark the optimistic bubble as delivered if still alive
+          setSentMessages((prev) => {
+            const updated: typeof prev = {};
+            for (const [k, list] of Object.entries(prev)) {
+              updated[k] = list.map((m) => m.id === data.tempId ? { ...m, status: "delivered" } : m);
+            }
+            return updated;
+          });
+          // Directly patch the DB message in thread state so ✓✓ appears immediately.
+          // The DB message's externalId is the tempId (until background task updates it),
+          // so we match on both tempId and canonicalId to be safe.
+          const ids = new Set([data.tempId, data.canonicalId].filter(Boolean));
+          console.log("[inbox] patching thread for ids:", [...ids]);
+          setThread((prev) => {
+            const threadIds = prev.map((m) => (m as InboxMessageApi).externalId);
+            console.log("[inbox] thread externalIds:", threadIds, "looking for:", [...ids]);
+            let changed = false;
+            const next = prev.map((m) => {
+              if (ids.has((m as InboxMessageApi).externalId)) {
+                changed = true;
+                return { ...m, waStatus: "delivered" } as InboxMessageApi;
+              }
+              return m;
+            });
+            console.log("[inbox] thread patch changed:", changed);
+            return changed ? next : prev;
+          });
+        }
+      } catch (err) { console.error("[inbox] send_confirmed error:", err); }
+    });
+
     es.addEventListener("send_failed", (e) => {
       try {
         const data = JSON.parse((e as any).data || "{}");
+        // Mark the optimistic message bubble as failed regardless of which chat is open
+        if (data.tempId) {
+          setSentMessages((prev) => {
+            const updated: typeof prev = {};
+            for (const [k, list] of Object.entries(prev)) {
+              updated[k] = list.map((m) => m.id === data.tempId ? { ...m, status: "failed" } : m);
+            }
+            return updated;
+          });
+        }
+        // Show error text only if this chat is currently open
         if (selectedRef.current?.contactId === data.contactId) {
-          const errText = data.error ?? "Message failed to deliver — please try again";
-          setSendError(errText);
+          const raw = data.error ?? "";
+          const clean = !raw || (raw.length > 120 && !raw.includes("Beeper") && !raw.includes("Settings"))
+            ? "Message not sent — please try again"
+            : raw;
+          setSendError(clean);
         }
       } catch {}
     });
@@ -568,7 +689,7 @@ export function InboxView() {
       threadLoadingRef.current = false;
       setThreadLoading(false);
     } else {
-      setThread([conv.latestMessage]);
+      setThread(conv.latestMessage ? [conv.latestMessage] : []);
       threadLoadingRef.current = true;
       setThreadLoading(true);
     }
@@ -577,18 +698,18 @@ export function InboxView() {
       ? inboxApi.getThread(conv.contactId, conv.platform)
       : conv.senderId
         ? inboxApi.getUnknownThread(conv.senderId, conv.platform)
-        : Promise.resolve([conv.latestMessage]);
+        : Promise.resolve(conv.latestMessage ? [conv.latestMessage] : []);
 
     threadPromise
       .then((res) => {
-        const fresh = res.length > 0 ? res : [conv.latestMessage];
+        const fresh = res.length > 0 ? res : (conv.latestMessage ? [conv.latestMessage] : []);
         threadCacheRef.current.set(conv.key, { msgs: fresh, at: Date.now() });
         if (selectedRef.current?.key === conv.key) {
           setThread(fresh);
         }
       })
       .catch(() => {
-        if (selectedRef.current?.key === conv.key) setThread([conv.latestMessage]);
+        if (selectedRef.current?.key === conv.key) setThread(conv.latestMessage ? [conv.latestMessage] : []);
       })
       .finally(() => {
         if (selectedRef.current?.key === conv.key) {
@@ -643,7 +764,8 @@ export function InboxView() {
       : textBody;
     if (!body || !selected) return;
 
-    const lastMsg = thread[thread.length - 1] ?? selected.latestMessage;
+    const lastMsg = thread[thread.length - 1] ?? selected.latestMessage ?? null;
+    const msgIdForReply = lastMsg?.id ?? "new";
     const tempId = `sent-${Date.now()}`;
     const replyToId = replyingTo?.id;
 
@@ -663,17 +785,15 @@ export function InboxView() {
 
     // Fire and forget — only revert to ⚠️ if it actually fails
     const ctx = { contactId: selected.contactId, platform: selected.platform, senderId: selected.senderId };
-    inboxApi.reply(lastMsg.id, body, replyToId, ctx).catch((e: unknown) => {
+    inboxApi.reply(msgIdForReply, body, replyToId, ctx, tempId).catch((e: unknown) => {
       setSentMessages((prev) => {
         const list = prev[selected.key] ?? [];
         return { ...prev, [selected.key]: list.map((m) => m.id === tempId ? { ...m, status: "failed" } : m) };
       });
       const raw = e instanceof Error ? e.message : "";
-      const friendly = raw.includes("re-authorization") || raw.includes("reconnect") || raw.includes("session")
-        ? raw
-        : raw.startsWith("API error") || raw.length > 120
-          ? "Message failed to deliver — please try again"
-          : raw || "Message failed to deliver — please try again";
+      const friendly = !raw || raw.startsWith("API error") || (raw.length > 120 && !raw.includes("Settings") && !raw.includes("Beeper"))
+        ? "Message failed to deliver — please try again"
+        : raw;
       setSendError(friendly);
     });
   };
@@ -699,13 +819,24 @@ export function InboxView() {
     }
   };
 
-  const handleDeleteMsg = async (msgId: string) => {
-    await inboxApi.delete(msgId).catch(() => {});
+  const handleDeleteMsg = (msgId: string) => {
     setThread((prev) => prev.filter((m) => m.id !== msgId));
     setSentMessages((prev) => {
       if (!selected) return prev;
       return { ...prev, [selected.key]: (prev[selected.key] ?? []).filter((m) => m.id !== msgId) };
     });
+    inboxApi.delete(msgId).catch(() => {});
+  };
+
+const insertEmoji = (emoji: string) => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    el.value = el.value.slice(0, start) + emoji + el.value.slice(end);
+    el.selectionStart = el.selectionEnd = start + emoji.length;
+    el.focus();
+    setShowEmojiPicker(false);
   };
 
   const handleAddToContacts = async () => {
@@ -903,6 +1034,29 @@ export function InboxView() {
 
         {/* Left: Conversation list — hidden on mobile when thread is open */}
         <div className={`rounded-xl border border-border bg-card shadow-sm flex flex-col overflow-y-auto ${selected ? "hidden md:flex" : "flex"}`}>
+          {/* Search bar */}
+          <div style={{ padding: "10px 10px 8px", borderBottom: "1px solid var(--bd)" }}>
+            <div style={{ position: "relative" }}>
+              <svg style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--t3)" }}
+                width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                placeholder="Search messages…"
+                style={{ width: "100%", padding: "7px 30px 7px 30px", borderRadius: 8, border: "1px solid var(--bd)",
+                  background: "var(--muted)", fontSize: 12, color: "var(--t1)", outline: "none",
+                  boxSizing: "border-box" }}
+              />
+              {searchQuery && (
+                <button onClick={() => { setSearchQuery(""); setSearchResults([]); }}
+                  style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", color: "var(--t3)", fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+              )}
+            </div>
+          </div>
           {loading && conversations.length === 0 ? (
             <div className="flex flex-col gap-0 p-2">
               {Array.from({ length: 7 }).map((_, i) => (
@@ -917,6 +1071,40 @@ export function InboxView() {
                   </div>
                 </div>
               ))}
+            </div>
+          ) : searchQuery.trim() ? (
+            // Search results
+            <div style={{ padding: "8px 6px" }}>
+              {searchLoading ? (
+                <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--t3)" }}>Searching…</div>
+              ) : searchResults.length === 0 ? (
+                <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "var(--t3)" }}>No results for "{searchQuery}"</div>
+              ) : searchResults.map((msg) => {
+                const matchConv = conversations.find((c) => c.contactId === msg.contactId && c.platform === msg.platform);
+                return (
+                  <button key={msg.id}
+                    onClick={() => { if (matchConv) selectConversation(matchConv); setSearchQuery(""); setSearchResults([]); }}
+                    style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2,
+                      padding: "9px 10px", borderRadius: 8, background: "transparent", border: "none",
+                      cursor: "pointer", textAlign: "left", transition: "background 0.1s" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--al)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+                      <PlatformIcon type={msg.platform as PlatformType} size={11} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--t1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {msg.contactName ?? msg.senderId ?? "Unknown"}
+                      </span>
+                      <span style={{ fontSize: 10, color: "var(--t3)", flexShrink: 0 }}>{fmtAgo(msg.receivedAt)}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: msg.fromMe ? "var(--t3)" : "var(--t2)",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%",
+                      paddingLeft: 17 }}>
+                      {msg.fromMe && <span style={{ color: "var(--t3)" }}>You: </span>}
+                      {msg.preview ?? msg.body ?? ""}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: 32, textAlign: "center", fontSize: 13, color: "var(--t3)" }}>
@@ -969,7 +1157,7 @@ export function InboxView() {
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       fontWeight: conv.unreadCount > 0 ? 500 : 400, marginBottom: 5,
                     }}>
-                      {conv.latestMessage.preview ?? conv.latestMessage.body ?? ""}
+                      {cleanPreview(conv.latestMessage.preview ?? conv.latestMessage.body ?? "")}
                     </div>
                     <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                       {conv.unreadCount > 0 && (
@@ -1079,13 +1267,15 @@ export function InboxView() {
                 <div role="button" tabIndex={0}
                   onClick={async () => {
                     const next = !selected.starred;
-                    await inboxApi.update(selected.latestMessage.id, { starred: next });
+                    if (selected.latestMessage?.id) {
+                      await inboxApi.update(selected.latestMessage.id, { starred: next });
+                    }
                     setConversations((prev) => prev.map((c) =>
                       c.key === selected.key
-                        ? { ...c, starred: next, latestMessage: { ...c.latestMessage, starred: next } }
+                        ? { ...c, starred: next, latestMessage: c.latestMessage ? { ...c.latestMessage, starred: next } : c.latestMessage }
                         : c
                     ));
-                    setSelected((s) => s ? { ...s, starred: next, latestMessage: { ...s.latestMessage, starred: next } } : s);
+                    setSelected((s) => s ? { ...s, starred: next, latestMessage: s.latestMessage ? { ...s.latestMessage, starred: next } : s.latestMessage } : s);
                   }}
                   style={{ cursor: "pointer", color: selected.starred ? "#f59e0b" : "var(--t3)",
                     display: "flex", alignItems: "center", padding: 4, borderRadius: 6,
@@ -1178,9 +1368,10 @@ export function InboxView() {
                     const isHovered = hoveredMsgId === msg.id;
                     const canDelete = "receivedAt" in msg; // only DB messages, not local sent
 
-                    const status = "status" in msg ? (msg as SentMessage).status : "sent";
+                    const status = "status" in msg ? (msg as SentMessage).status : undefined;
                     const isSending = status === "sending";
                     const isFailed = status === "failed";
+                    const isDelivered = status === "delivered";
 
                     return (
                       <div key={msg.id}
@@ -1251,6 +1442,7 @@ export function InboxView() {
                                   style={{ width: 10, height: 10, opacity: 0.6 }} />
                               );
                               if (isFailed) return <span style={{ color: "var(--rc)", fontWeight: "bold" }} title="Delivery failed">⚠️</span>;
+                              if (isDelivered) return <span style={{ color: "#53bdeb", fontSize: 13 }} title="Delivered to Beeper">✓✓</span>;
                               if (dbStatus === "read" || dbStatus === "played") return <span style={{ color: "#53bdeb", fontSize: 13 }} title="Read">✓✓</span>;
                               if (dbStatus === "delivered") return <span style={{ color: "var(--t3)", fontSize: 13 }} title="Delivered">✓✓</span>;
                               return <span style={{ color: "var(--t3)", fontSize: 13 }} title="Sent">✓</span>;
@@ -1263,7 +1455,7 @@ export function InboxView() {
                             {/* Reply button */}
                             <button
                               onClick={() => setReplyingTo(msg as InboxMessageApi)}
-                              title="Reply to this message"
+                              title="Reply"
                               style={{ background: "transparent", color: "var(--t3)", border: "none",
                                 borderRadius: 4, width: 24, height: 24, fontSize: 13, cursor: "pointer",
                                 display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1283,7 +1475,6 @@ export function InboxView() {
                                 onMouseLeave={(e) => (e.currentTarget.style.color = "var(--t3)")}>
                                 😊
                               </button>
-                              {/* Emoji picker popup */}
                               {reactionPickerId === msg.id && (
                                 <div style={{
                                   position: "absolute", bottom: 30,
@@ -1320,7 +1511,7 @@ export function InboxView() {
               </div>
 
               {/* Reply box */}
-              <div style={{ padding: "10px 14px", borderTop: "1px solid var(--bd)",
+              <div style={{ padding: "8px 12px", borderTop: "1px solid var(--bd)",
                 background: "var(--sf2)", flexShrink: 0 }}>
                 <input
                   ref={fileInputRef}
@@ -1334,27 +1525,52 @@ export function InboxView() {
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6,
                     padding: "6px 10px", borderRadius: 8, background: "var(--muted)",
                     border: "1px solid var(--bd)" }}>
-                    {pendingAttachment.isImage ? (
-                      <img src={pendingAttachment.previewUrl} alt={pendingAttachment.name}
-                        style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 48, height: 48, borderRadius: 6, background: "var(--al)",
-                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 20 }}>
-                        📎
-                      </div>
-                    )}
+                    <div style={{ position: "relative", flexShrink: 0 }}>
+                      {pendingAttachment.isImage ? (
+                        <img src={pendingAttachment.previewUrl} alt={pendingAttachment.name}
+                          style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, display: "block",
+                            opacity: pendingAttachment.uploading ? 0.5 : 1, transition: "opacity 0.2s" }} />
+                      ) : (
+                        <div style={{ width: 48, height: 48, borderRadius: 6, background: "var(--al)",
+                          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+                          📎
+                        </div>
+                      )}
+                      {pendingAttachment.uploading && (
+                        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center",
+                          justifyContent: "center", borderRadius: 6 }}>
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                          </svg>
+                        </div>
+                      )}
+                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, color: "var(--t1)", fontWeight: 500,
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {pendingAttachment.name}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--t3)" }}>
-                        {pendingAttachment.isImage ? "Image ready to send" : "File ready to send"}
-                      </div>
+                      {pendingAttachment.uploading ? (
+                        <div style={{ marginTop: 4 }}>
+                          <div style={{ height: 4, borderRadius: 2, background: "var(--bd)", overflow: "hidden" }}>
+                            <div style={{ height: "100%", borderRadius: 2, background: "#2563eb",
+                              width: `${pendingAttachment.uploadProgress ?? 0}%`, transition: "width 0.15s ease" }} />
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--t3)", marginTop: 2 }}>
+                            Uploading {pendingAttachment.uploadProgress ?? 0}%
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "var(--t3)" }}>
+                          {pendingAttachment.isImage ? "Ready to send" : "File ready to send"}
+                        </div>
+                      )}
                     </div>
-                    <button onClick={() => setPendingAttachment(null)}
-                      style={{ background: "none", border: "none", cursor: "pointer",
-                        color: "var(--t3)", fontSize: 18, lineHeight: 1, flexShrink: 0 }}>×</button>
+                    <button onClick={() => { if (pendingAttachment.blobUrl) URL.revokeObjectURL(pendingAttachment.blobUrl); setPendingAttachment(null); }}
+                      disabled={pendingAttachment.uploading}
+                      style={{ background: "none", border: "none", cursor: pendingAttachment.uploading ? "not-allowed" : "pointer",
+                        color: "var(--t3)", fontSize: 18, lineHeight: 1, flexShrink: 0,
+                        opacity: pendingAttachment.uploading ? 0.4 : 1 }}>×</button>
                   </div>
                 )}
                 {/* Reply-to quote preview */}
@@ -1376,42 +1592,98 @@ export function InboxView() {
                         color: "var(--t3)", fontSize: 18, lineHeight: 1, flexShrink: 0 }}>×</button>
                   </div>
                 )}
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                {/* Unified compose row */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 0,
+                  border: "1px solid var(--bd)", borderRadius: 12,
+                  background: "var(--card)",
+                }}>
                   {/* Paperclip button */}
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
                     title="Attach file"
-                    style={{ flexShrink: 0, height: 36, width: 36, borderRadius: 8, border: "1px solid var(--bd)",
-                      background: "var(--card)", cursor: uploading ? "not-allowed" : "pointer",
+                    style={{ flexShrink: 0, height: 40, width: 38, border: "none",
+                      borderRight: "1px solid var(--bd)",
+                      borderRadius: "11px 0 0 11px",
+                      background: "transparent", cursor: uploading ? "not-allowed" : "pointer",
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "var(--t3)", opacity: uploading ? 0.5 : 1 }}>
+                      color: "var(--t3)", opacity: uploading ? 0.4 : 1 }}>
                     {uploading ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     ) : (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                     )}
                   </button>
+                  {/* Emoji picker button */}
+                  <div style={{ position: "relative", flexShrink: 0 }}>
+                    <button
+                      onClick={() => setShowEmojiPicker((v) => !v)}
+                      title="Insert emoji"
+                      style={{ height: 40, width: 36, border: "none", borderRight: "1px solid var(--bd)",
+                        background: "transparent", cursor: "pointer", display: "flex",
+                        alignItems: "center", justifyContent: "center", fontSize: 16 }}>
+                      😊
+                    </button>
+                    {showEmojiPicker && (
+                      <div style={{
+                        position: "absolute", bottom: 48, left: 0, zIndex: 60,
+                        background: "var(--card)", border: "1px solid var(--bd)", borderRadius: 12,
+                        padding: "8px", width: 196, boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                      }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 2 }}>
+                          {EMOJI_LIST.map((em) => (
+                            <button key={em} onClick={() => insertEmoji(em)}
+                              style={{ background: "transparent", border: "none", cursor: "pointer",
+                                fontSize: 22, padding: "4px", borderRadius: 6, lineHeight: 1 }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--al)")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                              {em}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <textarea ref={textareaRef}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
                     }}
                     onPaste={handlePaste}
-                    placeholder={`Message ${selected.contactName ?? ""}… (Enter to send, Shift+Enter for newline)`}
-                    rows={2} style={{ flex: 1, resize: "none", fontSize: 13, padding: "8px 10px",
-                      borderRadius: 10, border: "1px solid var(--bd)", background: "var(--card)",
-                      color: "var(--t1)", outline: "none", lineHeight: 1.4 }} />
-                  <Button size="sm" onClick={handleSend} style={{ flexShrink: 0, height: 36 }}>
+                    onClick={() => setShowEmojiPicker(false)}
+                    placeholder={`Message ${selected.contactName ?? ""}…`}
+                    rows={1} style={{ flex: 1, resize: "none", fontSize: 13, padding: "10px 10px",
+                      border: "none", background: "transparent",
+                      color: "var(--t1)", outline: "none", lineHeight: 1.45,
+                      minHeight: 40, maxHeight: 120, overflowY: "auto" }} />
+                  <button onClick={handleSend}
+                    style={{ flexShrink: 0, height: 40, paddingInline: 16, border: "none",
+                      borderLeft: "1px solid var(--bd)",
+                      borderRadius: "0 11px 11px 0",
+                      background: "transparent", color: "#2563eb",
+                      fontWeight: 600, fontSize: 13, cursor: "pointer", letterSpacing: 0.2 }}>
                     Send
-                  </Button>
+                  </button>
                 </div>
                 {sendError && (
-                  <p style={{ fontSize: 11, color: "var(--rc)", marginTop: 4 }}>
-                    {sendError}
-                    {(sendError.includes("re-authorization") || sendError.includes("reconnect")) && (
-                      <> — <a href="/dashboard/settings" style={{ color: "var(--rc)", textDecoration: "underline" }}>Go to Settings</a></>
-                    )}
-                  </p>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 6,
+                    padding: "8px 12px", borderRadius: 8, background: "rgba(220,38,38,0.08)",
+                    border: "1px solid rgba(220,38,38,0.25)" }}>
+                    <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 12, color: "var(--rc)", margin: 0, fontWeight: 500 }}>
+                        {sendError}
+                      </p>
+                      {(sendError.includes("Settings") || sendError.includes("reconnect") || sendError.includes("re-authorization")) && (
+                        <a href="/dashboard/settings" style={{ fontSize: 11, color: "var(--rc)", textDecoration: "underline", display: "inline-block", marginTop: 2 }}>
+                          Go to Settings →
+                        </a>
+                      )}
+                    </div>
+                    <button onClick={() => setSendError("")}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--rc)",
+                        fontSize: 16, lineHeight: 1, flexShrink: 0, padding: 0 }}>×</button>
+                  </div>
                 )}
               </div>
             </>

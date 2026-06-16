@@ -369,8 +369,10 @@ export const inboxApi = {
 
   delete: (id: string) =>
     apiFetch<{ success: boolean }>(`/api/inbox/${id}`, { method: "DELETE" }),
-  reply: (id: string, body: string, replyToId?: string, ctx?: { contactId?: string | null; platform?: string; senderId?: string | null }) =>
-    apiFetch<{ ok: boolean }>(`/api/inbox/${id}/reply`, { method: "POST", body: JSON.stringify({ body, replyToId, ...ctx }) }),
+  patch: (id: string, data: { body?: string; read?: boolean; starred?: boolean }) =>
+    apiFetch<{ id: string }>(`/api/inbox/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  reply: (id: string, body: string, replyToId?: string, ctx?: { contactId?: string | null; platform?: string; senderId?: string | null }, tempId?: string) =>
+    apiFetch<{ ok: boolean }>(`/api/inbox/${id}/reply`, { method: "POST", body: JSON.stringify({ body, replyToId, tempId, ...ctx }) }),
   react: (id: string, emoji: string) =>
     apiFetch<{ ok: boolean }>(`/api/inbox/${id}/react`, { method: "POST", body: JSON.stringify({ emoji }) }),
   upload: (filename: string, fileData: string) =>
@@ -382,6 +384,8 @@ export const inboxApi = {
     apiFetch<InboxMessageApi[]>(`/api/inbox/thread-more?contactId=${encodeURIComponent(contactId)}&platform=${encodeURIComponent(platform)}&before=${encodeURIComponent(before)}&limit=${limit}`),
   subscribePresence: (jid: string) =>
     apiFetch<{ ok: boolean }>("/api/inbox/subscribe-presence", { method: "POST", body: JSON.stringify({ jid }) }),
+  search: (q: string) =>
+    apiFetch<InboxMessageApi[]>(`/api/inbox/search?q=${encodeURIComponent(q)}`),
 };
 
 // ─── Discord API ────────────────────────────────────────────

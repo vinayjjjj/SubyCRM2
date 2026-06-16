@@ -8,6 +8,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import type { Reminder, ReminderStatus, PlatformType, Contact } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { getCached, setCached } from "@/lib/page-cache";
 
 type Bucket = "overdue" | "today" | "this_week" | "later";
 
@@ -88,8 +89,9 @@ function lastChannel(contact: Contact | null): PlatformType | null {
 const API_BASE = "";
 
 export function RemindersView() {
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedReminders = getCached<Reminder[]>("reminders:list");
+  const [reminders, setReminders] = useState<Reminder[]>(cachedReminders ?? []);
+  const [loading, setLoading] = useState(!cachedReminders);
   const [query, setQuery] = useState("");
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<Bucket | null>(null);
@@ -111,7 +113,7 @@ export function RemindersView() {
 
   const fetchReminders = () =>
     remindersApi.getAll()
-      .then((data) => setReminders(data ?? []))
+      .then((data) => { setReminders(data ?? []); setCached("reminders:list", data ?? []); })
       .catch(() => {});
 
   useEffect(() => {
