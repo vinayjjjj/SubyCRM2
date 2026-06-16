@@ -81,13 +81,13 @@
 
   Run
 
-  # Terminal 1 — frontend (port 3005)
+  # Terminal 1 — frontend (port 3000)
   npm run dev
 
   # Terminal 2 — backend API (port 4002)
   npm run server
 
-  Open http://localhost:3005.
+  Open http://localhost:3000.
 
   Architecture
 
